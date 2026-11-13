@@ -18,11 +18,15 @@ async function makeBackup(destination) {
   try { await backup(db, destination); }
   finally { db.close(); }
   chmodSync(destination, 0o600);
-  const checkDb = new DatabaseSync(destination, { readOnly: true });
+  const checkDb = new DatabaseSync(destination);
+  let memoryCount;
   try {
+    checkDb.exec('PRAGMA journal_mode = DELETE');
     if (Object.values(checkDb.prepare('PRAGMA integrity_check').get() ?? {})[0] !== 'ok') throw new Error('备份完整性检查失败。');
-    return { path: destination, memoryCount: Number(checkDb.prepare('SELECT COUNT(*) AS n FROM memories').get().n) };
+    memoryCount = Number(checkDb.prepare('SELECT COUNT(*) AS n FROM memories').get().n);
   } finally { checkDb.close(); }
+  for (const suffix of ['-wal', '-shm']) rmSync(`${destination}${suffix}`, { force: true });
+  return { path: destination, memoryCount };
 }
 
 async function restore(source) {
