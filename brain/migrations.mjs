@@ -154,6 +154,28 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 8,
+    name: 'desktop-activity-events',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS desktop_activity_events (
+          id INTEGER PRIMARY KEY,
+          event_key TEXT NOT NULL UNIQUE,
+          source TEXT NOT NULL CHECK (source IN ('conversation','life','system')),
+          activity TEXT NOT NULL CHECK (activity IN ('chat','thinking','phone','computer','play','journal','explore','success','error')),
+          phase TEXT NOT NULL CHECK (phase IN ('start','done','error')),
+          message TEXT NOT NULL,
+          animation TEXT NOT NULL,
+          delivered INTEGER NOT NULL DEFAULT 0 CHECK (delivered IN (0,1)),
+          delivery_error TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          delivered_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS desktop_activity_recent ON desktop_activity_events(created_at DESC);
+      `);
+    },
+  },
 ];
 
 export function latestVersion() { return MIGRATIONS.at(-1)?.version ?? 0; }

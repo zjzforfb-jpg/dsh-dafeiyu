@@ -57,6 +57,17 @@ npm run life:run
 
 手动写今天的日记可用 `npm run life:run -- journal`。手动触发同样遵守每天一次的限制，需大肥鱼进程正在运行。日记会引用保存的记忆和当天的探索记录；没有记录时会如实写安静的一天。最近的小探索和日记也会进入后续聊天的上下文，让它能延续当时的心情与想法。
 
+## 安卓设备接入
+
+荣耀 Magic5 当前可通过 USB ADB 识别。只读查看设备、系统和抖音/微信安装状态：
+
+```sh
+npm run device:status
+npm run device:screenshot
+```
+
+截图保存在权限受限且被 Git 忽略的 `runtime/device/` 中，可能含个人信息。设备接入方案与两款 App 的官方能力边界见 [`docs/ANDROID_DEVICE_BRIDGE.md`](docs/ANDROID_DEVICE_BRIDGE.md)。目前还没有自动发送微信消息、评论或发布内容。
+
 ## Mac 登录后自动启动
 
 在 Mac 上退出手动运行的 `npm start`，然后安装当前用户的 LaunchAgent：

@@ -28,6 +28,11 @@ mkdirSync(dirname(configFile), { recursive: true });
 if (!existsSync(configFile)) copyFileSync(template, configFile);
 
 const args = process.argv.slice(2);
+if (!args.includes('--check') && !args.includes('--port') && !args.some((arg) => arg.startsWith('--port='))) {
+  args.push('--port', '3108');
+}
+const portIndex = args.indexOf('--port');
+const petPort = Number(portIndex >= 0 ? args[portIndex + 1] : args.find((arg) => arg.startsWith('--port='))?.split('=')[1] ?? 3108);
 if (args.includes('--check')) {
   const child = spawn(process.execPath, [entry, '--check'], {
     cwd: projectRoot,
@@ -65,13 +70,8 @@ if (!modelKey && process.platform === 'darwin') {
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch { /* 密钥尚未配置，记忆桥会明确返回配置错误。 */ }
 }
-const brain = await startBrain({ home, token: aiSettings.apiKey, apiKey: modelKey, personaPath: join(projectRoot, 'config', 'persona.md') });
+const brain = await startBrain({ home, token: aiSettings.apiKey, apiKey: modelKey, personaPath: join(projectRoot, 'config', 'persona.md'), petPort });
 console.log(`[大肥鱼] 记忆桥已启动；模型${modelKey ? '已就绪' : '尚未配置密钥'}。`);
-if (!args.includes('--check') && !args.includes('--port') && !args.some((arg) => arg.startsWith('--port='))) {
-  args.push('--port', '3108');
-}
-const portIndex = args.indexOf('--port');
-const petPort = Number(portIndex >= 0 ? args[portIndex + 1] : args.find((arg) => arg.startsWith('--port='))?.split('=')[1] ?? 3108);
 const life = modelKey ? startLifeSchedule({ home, brainPort: brain.port, token: aiSettings.apiKey, petPort }) : null;
 
 const child = spawn(process.execPath, [entry, ...args], {

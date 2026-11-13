@@ -1,7 +1,9 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { openMemory, recall, capture, reviseMemory, forgetMemory } from './memory.mjs';
+import { classifyConversation, publishDesktopActivity } from '../desktop/activity.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
@@ -58,7 +60,7 @@ function userFacingText(raw) {
   return raw.split(/\n\n\[(?:配图|动作)\]/u, 1)[0].trim();
 }
 
-export async function startBrain({ home, token, apiKey, personaPath, port = 3110, upstreamUrl = 'https://api.deepseek.com' }) {
+export async function startBrain({ home, token, apiKey, personaPath, port = 3110, petPort = 3108, upstreamUrl = 'https://api.deepseek.com' }) {
   const db = openMemory(join(home, 'dafeiyu-memory.sqlite'));
   const server = createServer(async (req, res) => {
     const path = new URL(req.url ?? '/', `http://127.0.0.1:${port}`).pathname;
@@ -110,6 +112,19 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
     const baseSystem = body.messages.find((message) => message.role === 'system')?.content ?? '';
     const persona = personaPath ? readFileSync(personaPath, 'utf8') : '';
     const messages = [{ role: 'system', content: `${persona}\n\n${baseSystem}${memoryActionNote ? `\n\n本轮记忆操作结果：${memoryActionNote} 请只按此结果向爸爸确认。` : ''}${memorySection(db, userText)}${lifeSection(db)}` }, ...body.messages.filter((message) => message.role !== 'system')];
+    const requestId = randomUUID();
+    const activity = classifyConversation(userText);
+    const startActivity = publishDesktopActivity({ db, home, port: petPort, eventKey: `${requestId}:start`, event: { source: 'conversation', activity: 'thinking', phase: 'start', bubble: false } }).catch(() => ({ ok: false }));
+    const finishActivity = async (phase, selected = activity) => {
+      await startActivity;
+      await publishDesktopActivity({
+        db,
+        home,
+        port: petPort,
+        eventKey: `${requestId}:${phase}`,
+        event: { source: 'conversation', activity: selected, phase, bubble: false },
+      }).catch(() => {});
+    };
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
@@ -121,6 +136,7 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
       });
       if (!upstream.ok) {
         const detail = (await upstream.text()).slice(0, 1000);
+        void finishActivity('error', 'error');
         sendJson(res, upstream.status, { error: { message: detail || 'Upstream error', type: 'upstream_error' } });
         return;
       }
@@ -128,6 +144,8 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
         const data = await upstream.json();
         const answer = data.choices?.[0]?.message?.content;
         if (typeof answer === 'string' && answer.trim()) capture(db, userText, answer);
+        if (typeof answer === 'string' && answer.trim()) void finishActivity('done');
+        else void finishActivity('error', 'error');
         sendJson(res, 200, data);
         return;
       }
@@ -147,8 +165,11 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
         }
       }
       if (completed && answer.trim()) capture(db, userText, answer);
+      if (completed && answer.trim()) void finishActivity('done');
+      else void finishActivity('error', 'error');
       res.end();
     } catch (error) {
+      void finishActivity('error', 'error');
       if (!res.headersSent) sendJson(res, 502, { error: { message: 'Model request failed', type: 'upstream_error' } });
       else res.end();
       if (error?.name !== 'AbortError') console.error('[大肥鱼] 模型连接失败：', error.message);

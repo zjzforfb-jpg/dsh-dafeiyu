@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { openMemory } from '../brain/memory.mjs';
 import { claimTask, completeTask, DAILY_BUDGET, enqueueTask, failTask, recoverStaleTasks, reserveAutonomousAction, reserveModelCall } from './tasks.mjs';
+import { publishDesktopActivity } from '../desktop/activity.mjs';
 
 export const LIFE_CONFIG = Object.freeze({ timeZone: 'Asia/Shanghai', exploreAt: '09:00', journalAt: '21:30', quietStart: '22:30', quietEnd: '08:30' });
 
@@ -43,7 +44,7 @@ function parseAnswer(answer, kind, goals = []) {
   return output;
 }
 
-export async function runLifeJob({ db, kind, day, ask, broadcast = async () => {} }) {
+export async function runLifeJob({ db, kind, day, ask, broadcast = async () => {}, activity = null }) {
   if (!['explore', 'journal'].includes(kind) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('无效的日常任务');
   db.prepare('INSERT OR IGNORE INTO life_events (day, kind) VALUES (?, ?)').run(day, kind);
   const event = db.prepare('SELECT status FROM life_events WHERE day = ? AND kind = ?').get(day, kind);
@@ -59,8 +60,13 @@ export async function runLifeJob({ db, kind, day, ask, broadcast = async () => {
     return { skipped: 'action-budget' };
   }
   db.prepare("UPDATE life_events SET status = 'running', attempts = attempts + 1, updated_at = datetime('now') WHERE day = ? AND kind = ?").run(day, kind);
+  const activityName = kind === 'explore' ? 'explore' : 'journal';
   try {
-    try { await broadcast(kind === 'explore' ? '大肥鱼正在想今天的小问题…' : '大肥鱼在写今天的日记…'); } catch { /* 桌面暂不可用不影响日常记录。 */ }
+    if (activity) {
+      try { await activity({ source: 'life', activity: activityName, phase: 'start' }); } catch { /* 桌面状态不影响日常任务。 */ }
+    } else {
+      try { await broadcast(kind === 'explore' ? '大肥鱼正在想今天的小问题…' : '大肥鱼在写今天的日记…'); } catch { /* 桌面暂不可用不影响日常记录。 */ }
+    }
     if (!reserveModelCall(db, day)) throw new Error(`今日自主模型调用预算已用完（上限 ${DAILY_BUDGET.modelCalls}）`);
     const jobContext = JSON.parse(context(db, day));
     if (kind === 'explore' && jobContext.goals.length === 0) throw new Error('没有启用的长期目标，无法安排小探索');
@@ -79,11 +85,16 @@ export async function runLifeJob({ db, kind, day, ask, broadcast = async () => {
       completeTask(db, claimed.id, { ...content, completedDay: day });
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
-    try { await broadcast(content.say); } catch { /* 桌面暂不可用不影响日常记录。 */ }
+    if (activity) {
+      try { await activity({ source: 'life', activity: activityName, phase: 'done', message: content.say }); } catch { /* 桌面状态不影响日常任务。 */ }
+    } else {
+      try { await broadcast(content.say); } catch { /* 桌面暂不可用不影响日常记录。 */ }
+    }
     return { done: true, content };
   } catch (error) {
     db.prepare("UPDATE life_events SET status = 'failed', updated_at = datetime('now') WHERE day = ? AND kind = ?").run(day, kind);
     failTask(db, claimed, error);
+    if (activity) try { await activity({ source: 'life', activity: 'error', phase: 'error' }); } catch { /* 桌面状态不影响错误记录。 */ }
     throw error;
   }
 }
@@ -132,7 +143,14 @@ export function startLifeSchedule({ home, brainPort, token, petPort = 3108, conf
     if (!kind) return;
     busy = true;
     try {
-      await runLifeJob({ db, kind, day: date, ask: (text) => askBrain({ port: brainPort, token, text }), broadcast: (text) => broadcastPet({ port: petPort, stateFile, text }) });
+      await runLifeJob({
+        db,
+        kind,
+        day: date,
+        ask: (text) => askBrain({ port: brainPort, token, text }),
+        broadcast: (text) => broadcastPet({ port: petPort, stateFile, text }),
+        activity: (event) => publishDesktopActivity({ db, home, port: petPort, event }),
+      });
     } catch (error) { console.error('[大肥鱼] 日常任务失败：', error.message); }
     finally { busy = false; }
   };
