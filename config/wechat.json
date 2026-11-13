@@ -1,0 +1,13 @@
+{
+  "packageName": "com.tencent.mm",
+  "activity": ".ui.LauncherUI",
+  "user": 0,
+  "ime": "com.android.adbkeyboard/.AdbIME",
+  "screen": { "width": 1312, "height": 2848 },
+  "tabs": { "chat": { "x": 181, "y": 2760 } },
+  "input": { "x": 545, "y": 2730 },
+  "contacts": {
+    "爸爸": { "x": 600, "y": 380 },
+    "妈妈": { "x": 600, "y": 611 }
+  }
+}

@@ -20,6 +20,7 @@
     "desktop:status": "node scripts/desktop.mjs status",
     "device:status": "node scripts/device.mjs status",
     "device:screenshot": "node scripts/device.mjs screenshot",
+    "device:wechat": "node scripts/wechat.mjs",
     "service:install": "node scripts/service.mjs install",
     "service:status": "node scripts/service.mjs status",
     "service:stop": "node scripts/service.mjs stop",
