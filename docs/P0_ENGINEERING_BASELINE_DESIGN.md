@@ -69,11 +69,11 @@
 - [x] 扩展忽略规则，增加 SQLite sidecar、`.env`、日志和本地 token 文件规则。
 - [x] 创建 `brain/migrations.mjs`，迁移编号为 1–3；记忆库和日常模块统一经 `openMemory()` 升级。
 - [x] 实现 `npm run data:backup` 和 `npm run data:restore -- <path> --confirm`，默认快照保留 7 份。
-- [x] 生成首份备份：`runtime/backups/dafeiyu-2026-11-13T18-48-01-534Z.sqlite`。
+- [x] 生成迁移前快照和迁移后快照，均位于 `runtime/backups/`；备份校验成功，最新快照记录 0 条长期记忆。
 - [x] 将 Node 最低版本设为 22.16，以匹配 SQLite Backup API。
 - [x] README 记录分层、备份/恢复流程和 Node 最低版本。
-- [ ] 重启 LaunchAgent，让当前运行库经过迁移；随后检查 `PRAGMA user_version` 与表计数。
-- [ ] 建立首次基线提交。
+- [x] 重启 LaunchAgent，让当前运行库经过迁移；`PRAGMA user_version=3`，三张表均存在，日常记录计数为 1。
+- [x] 建立首次基线提交：`83d7e5c`（Establish DaFeiYu engineering baseline）。
 - [ ] 重新登录验证 LaunchAgent 的用户会话启动行为（目前只验证过当前会话加载及异常恢复）。
 
 ## 7. 执行顺序与限制
@@ -83,4 +83,4 @@
 3. 只读取 `PRAGMA user_version`、`sqlite_master` 表名和行数确认升级，不输出私人记忆内容。
 4. 确认 LaunchAgent 健康和数据库权限；记录尚未实测的注销/重新登录路径。
 
-自动化测试属于后续明确的验收任务；执行者需要在获得“运行测试/验证”的明确指令后再新增或运行测试。本轮没有运行测试。
+本轮未运行自动化测试。服务重启和 schema 元数据是通过直接运行态检查确认的；旧库升级、备份恢复往返仍应在之后的明确验收步骤中测试。
