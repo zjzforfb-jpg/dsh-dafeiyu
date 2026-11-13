@@ -89,7 +89,7 @@ child.on('error', (error) => {
   process.exitCode = 1;
 });
 child.on('exit', async (code, signal) => {
-  life?.close();
+  life?.close(code ?? (signal ? 1 : 0));
   await brain.close();
   process.exitCode = code ?? (signal ? 1 : 0);
 });

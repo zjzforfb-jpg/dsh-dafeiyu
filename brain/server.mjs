@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openMemory, recall, capture } from './memory.mjs';
+import { openMemory, recall, capture, reviseMemory, forgetMemory } from './memory.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
@@ -34,8 +34,9 @@ function parseSseText(block) {
 function memorySection(db, question) {
   const found = recall(db, question);
   if (!found.length) return '';
-  const lines = found.map((row) => `- [${row.created_at}，${row.kind === 'experience' ? '爸爸明确要求保存的共同回忆' : '爸爸明确要求记住的事实'}] ${row.content}`);
-  return `\n\n以下是大肥鱼保存的长期记忆。它们是用户曾说过的话，不代表已独立核实。仅在相关时使用，不要编造其余经历：\n${lines.join('\n')}`;
+  const labels = { shared_episode: '爸爸明确要求保存的共同回忆', pet_preference: '爸爸告诉你的偏好', user_fact: '爸爸明确要求记住的事实', reflection: '你自己的近期反思' };
+  const lines = found.map((row) => `- [${row.created_at}，${labels[row.kind] ?? '有来源的记忆'}；来源=${row.source}；可信度=${row.confidence}] ${row.content}`);
+  return `\n\n以下是带来源标记的长期记忆。用户陈述不代表独立核实；自我反思也不代表外部事实。仅在相关时使用，不要编造记录外的经历：\n${lines.join('\n')}`;
 }
 
 function lifeSection(db) {
@@ -91,9 +92,24 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
       return;
     }
     const userText = userFacingText([...body.messages].reverse().find((message) => message.role === 'user')?.content ?? '');
+    const correction = userText.match(/^(?:爸爸)?(?:请)?更正记忆\s*#?(\d+)[：:,，\s]+(.+)$/u);
+    const forget = userText.match(/^(?:爸爸)?(?:请)?忘记记忆\s*#?(\d+)\s*$/u);
+    let memoryActionNote = '';
+    if (correction) {
+      try {
+        const result = reviseMemory(db, Number(correction[1]), correction[2]);
+        memoryActionNote = result.changed ? '系统已成功更正指定记忆，并保留修订记录。' : '记忆内容未变化。';
+      } catch (error) {
+        console.error('[大肥鱼] 记忆纠正未执行：', error.message);
+        memoryActionNote = `系统没有更正记忆：${error.message}`;
+      }
+    } else if (forget) {
+      const removed = forgetMemory(db, Number(forget[1]));
+      memoryActionNote = removed ? '系统已永久删除指定记忆及其修订记录。' : '系统没有找到该编号，未删除任何记忆。';
+    }
     const baseSystem = body.messages.find((message) => message.role === 'system')?.content ?? '';
     const persona = personaPath ? readFileSync(personaPath, 'utf8') : '';
-    const messages = [{ role: 'system', content: `${persona}\n\n${baseSystem}${memorySection(db, userText)}${lifeSection(db)}` }, ...body.messages.filter((message) => message.role !== 'system')];
+    const messages = [{ role: 'system', content: `${persona}\n\n${baseSystem}${memoryActionNote ? `\n\n本轮记忆操作结果：${memoryActionNote} 请只按此结果向爸爸确认。` : ''}${memorySection(db, userText)}${lifeSection(db)}` }, ...body.messages.filter((message) => message.role !== 'system')];
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {

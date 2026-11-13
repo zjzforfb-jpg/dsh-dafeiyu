@@ -13,7 +13,7 @@ test('长期记忆不收录常见秘密', () => {
   assert.equal(memoryFromUser('请记住：我的密码是 123456'), null);
   assert.equal(memoryFromUser('记住：我的 API Key 是 abc'), null);
   assert.equal(memoryFromUser('记住：我喜欢草莓'), '我喜欢草莓');
-  assert.deepEqual(memoryRecordFromUser('这是我们的回忆：一起给大肥鱼起了名字'), { content: '一起给大肥鱼起了名字', kind: 'experience' });
+  assert.deepEqual(memoryRecordFromUser('这是我们的回忆：一起给大肥鱼起了名字'), { content: '一起给大肥鱼起了名字', kind: 'shared_episode', source: 'user_explicit', confidence: 1 });
   assert.equal(memoryFromUser('这是我们的回忆：爸爸的验证码是 123456'), null);
 });
 
@@ -28,7 +28,7 @@ test('旧版记忆库升级后保留原有事实', () => {
     const db = openMemory(path);
     const row = db.prepare('SELECT content, kind FROM memories').get();
     assert.equal(row.content, '爸爸喜欢草莓');
-    assert.equal(row.kind, 'fact');
+    assert.equal(row.kind, 'user_fact');
     db.close();
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

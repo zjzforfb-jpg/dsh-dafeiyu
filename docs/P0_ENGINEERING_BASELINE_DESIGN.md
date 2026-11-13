@@ -32,6 +32,10 @@
 | 1 | `baseline-memory` | 创建 `turns`、`memories` 基础表；使用 `IF NOT EXISTS` 接纳已存在的同名表 |
 | 2 | `memory-kind-column` | 检查 `memories.kind`；缺少时添加 `TEXT NOT NULL DEFAULT 'fact'` |
 | 3 | `life-events` | 创建日常任务表；已有表保持原样 |
+| 4 | `memory-provenance-revisions` | 记忆类型、来源、可信度、上下文开关与修订历史 |
+| 5 | `durable-task-queue-and-budget` | 持久任务队列、状态、幂等键和每日预算 |
+| 6 | `long-term-goals` | 长期目标、进度记录和任务目标关联 |
+| 7 | `service-run-heartbeats` | 服务实例、心跳、正常停止与异常恢复记录 |
 
 升级顺序必须兼容三种输入：全新数据库；旧库中已有记忆但没有 `kind`；当前运行库已含 `kind` 和 `life_events`、版本号仍为 0。每个版本在一个 `BEGIN IMMEDIATE` 事务中执行，成功后更新 `user_version` 并提交；失败则回滚并抛出包含版本号的错误。迁移应可重复运行，不删除或重建已有业务数据。
 
@@ -67,20 +71,21 @@
 
 - [x] 初始化 Git `main`，检查 staged 文件；`runtime/`、SQLite、桌宠运行配置和备份均被忽略。
 - [x] 扩展忽略规则，增加 SQLite sidecar、`.env`、日志和本地 token 文件规则。
-- [x] 创建 `brain/migrations.mjs`，迁移编号为 1–3；记忆库和日常模块统一经 `openMemory()` 升级。
+- [x] 创建 `brain/migrations.mjs`，迁移编号为 1–7；所有模块统一经 `openMemory()` 升级。
 - [x] 实现 `npm run data:backup` 和 `npm run data:restore -- <path> --confirm`，默认快照保留 7 份。
 - [x] 生成迁移前快照和迁移后快照，均位于 `runtime/backups/`；备份校验成功，最新快照记录 0 条长期记忆。
 - [x] 将 Node 最低版本设为 22.16，以匹配 SQLite Backup API。
 - [x] README 记录分层、备份/恢复流程和 Node 最低版本。
-- [x] 重启 LaunchAgent，让当前运行库经过迁移；`PRAGMA user_version=3`，三张表均存在，日常记录计数为 1。
+- [x] 重启 LaunchAgent，让当前运行库经过迁移；`PRAGMA user_version=7`，记忆、目标、任务和心跳表均存在。
 - [x] 建立首次基线提交：`83d7e5c`（Establish DaFeiYu engineering baseline）。
-- [ ] 重新登录验证 LaunchAgent 的用户会话启动行为（目前只验证过当前会话加载及异常恢复）。
+- [x] 通过 GUI 用户域执行卸载/重新注册，验证服务可重新启动；真实注销/登录尚未实测。
+- [x] 备份当前快照、停服、恢复同一快照并重新启动；恢复脚本留下安全副本。
 
 ## 7. 执行顺序与限制
 
-1. 已完成的源码、配置和数据边界先加入 Git 暂存区；确认无本地数据或密钥后提交基线。
-2. 停止大肥鱼 LaunchAgent，使用新迁移入口打开现有数据库，然后重新启动服务。
-3. 只读取 `PRAGMA user_version`、`sqlite_master` 表名和行数确认升级，不输出私人记忆内容。
-4. 确认 LaunchAgent 健康和数据库权限；记录尚未实测的注销/重新登录路径。
+1. Git 基线与数据边界已建立，运行数据仍被忽略。
+2. 现有数据库已迁移到版本 7；只检查了 schema 和行数，没有输出私人记忆。
+3. 快照恢复往返完成，服务恢复后健康检查通过。
+4. 真实注销/重新登录仍需之后做一次实机验收。
 
-本轮未运行自动化测试。服务重启和 schema 元数据是通过直接运行态检查确认的；旧库升级、备份恢复往返仍应在之后的明确验收步骤中测试。
+本轮未运行自动化测试。服务重启、schema 元数据和备份恢复往返通过直接运行态操作确认。

@@ -16,11 +16,13 @@ export function openMemory(path) {
 export function memoryRecordFromUser(text) {
   const cleaned = text.trim();
   const experience = cleaned.match(/^(?:请)?(?:记住)?(?:这是)?我们的回忆[：:,，\s]*(.+)$/u);
+  const preference = cleaned.match(/^(?:请)?(?:你要)?记住[：:,，\s]*(?:你)?(?:最)?喜欢(?:的)?[：:,，\s]*(.+)$/u);
   const fact = cleaned.match(/^(?:爸爸(?:想让你)?|我(?:想让你)?)?\s*(?:请)?记住[：:,，\s]*(.+)$/u);
-  const content = (experience?.[1] ?? fact?.[1])?.trim();
+  const rawContent = (experience?.[1] ?? preference?.[1] ?? fact?.[1])?.trim();
+  const content = preference && rawContent ? `大肥鱼喜欢${rawContent}` : rawContent;
   if (!content || content.length > 500) return null;
   if (/(?:密码|口令|验证码|短信码|动态码|api[ _-]?key|access[ _-]?token|secret|银行卡|身份证号)/iu.test(content)) return null;
-  return { content, kind: experience ? 'experience' : 'fact' };
+  return { content, kind: experience ? 'shared_episode' : preference ? 'pet_preference' : 'user_fact', source: 'user_explicit', confidence: 1 };
 }
 
 export function memoryFromUser(text) {
@@ -36,7 +38,7 @@ function terms(text) {
 }
 
 export function recall(db, question, limit = 5) {
-  const rows = db.prepare('SELECT id, content, kind, created_at FROM memories ORDER BY id DESC LIMIT 200').all();
+  const rows = db.prepare('SELECT id, content, kind, source, confidence, created_at FROM memories WHERE active = 1 AND include_context = 1 ORDER BY id DESC LIMIT 300').all();
   const query = terms(question);
   const scored = rows.map((row) => {
     const overlap = [...terms(row.content)].filter((term) => query.has(term)).length;
@@ -56,6 +58,36 @@ export function capture(db, userText, assistantText) {
   const previous = db.prepare('SELECT source_turn_id FROM memories WHERE content = ?').get(content);
   if (previous) return { turnId: Number(previous.source_turn_id), remembered: content };
   const turn = db.prepare('INSERT INTO turns (user_text, assistant_text) VALUES (?, ?)').run(userText, assistantText);
-  db.prepare('INSERT INTO memories (content, source_turn_id, kind) VALUES (?, ?, ?)').run(content, turn.lastInsertRowid, kind);
+  db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, record.source, record.confidence);
   return { turnId: Number(turn.lastInsertRowid), remembered: content };
+}
+
+export function reviseMemory(db, id, nextContent, reason = '用户明确纠正') {
+  const content = String(nextContent ?? '').trim();
+  if (!Number.isInteger(Number(id)) || Number(id) < 1) throw new Error('记忆编号无效');
+  if (!content || content.length > 500) throw new Error('新记忆不能为空且不能超过 500 字');
+  if (/(?:密码|口令|验证码|短信码|动态码|api[ _-]?key|access[ _-]?token|secret|银行卡|身份证号)/iu.test(content)) throw new Error('新内容看起来包含敏感信息，未保存');
+  const old = db.prepare('SELECT content, kind FROM memories WHERE id = ? AND active = 1').get(Number(id));
+  if (!old) throw new Error(`没有可修改的活跃记忆 ${id}`);
+  if (old.content === content) return { id: Number(id), changed: false };
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('INSERT INTO memory_revisions (memory_id, old_content, new_content, reason) VALUES (?, ?, ?, ?)').run(Number(id), old.content, content, reason);
+    db.prepare("UPDATE memories SET content = ?, source = 'user_correction', confidence = 1, include_context = 1 WHERE id = ?").run(content, Number(id));
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  return { id: Number(id), changed: true };
+}
+
+export function forgetMemory(db, id) {
+  const memory = db.prepare('SELECT source_turn_id FROM memories WHERE id = ?').get(Number(id));
+  if (!memory) return false;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('DELETE FROM memory_revisions WHERE memory_id = ?').run(Number(id));
+    db.prepare('DELETE FROM memories WHERE id = ?').run(Number(id));
+    if (memory.source_turn_id) db.prepare('DELETE FROM turns WHERE id = ?').run(memory.source_turn_id);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  return true;
 }
