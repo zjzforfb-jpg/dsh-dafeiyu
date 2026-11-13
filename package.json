@@ -1,0 +1,30 @@
+{
+  "name": "dafeiyu-floating",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/run-pet.mjs",
+    "check": "node scripts/run-pet.mjs --check",
+    "test": "node --test tests/*.test.mjs",
+    "key:setup": "node scripts/key.mjs setup",
+    "key:check": "node scripts/key.mjs check",
+    "memory:list": "node scripts/memory.mjs list",
+    "memory:forget": "node scripts/memory.mjs forget",
+    "life:status": "node scripts/life.mjs status",
+    "life:run": "node scripts/life.mjs run",
+    "service:install": "node scripts/service.mjs install",
+    "service:status": "node scripts/service.mjs status",
+    "service:stop": "node scripts/service.mjs stop",
+    "service:start": "node scripts/service.mjs start",
+    "service:uninstall": "node scripts/service.mjs uninstall",
+    "data:backup": "node scripts/data.mjs backup",
+    "data:restore": "node scripts/data.mjs restore"
+  },
+  "dependencies": {
+    "dsh-pet": "0.4.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

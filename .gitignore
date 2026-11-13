@@ -1,0 +1,13 @@
+node_modules/
+runtime/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+standalone-ai.json
+standalone-runtime.json

@@ -1,0 +1,22 @@
+{
+  "pets": [
+    {
+      "id": "main",
+      "name": "大肥鱼",
+      "size": 360,
+      "display": "desktop",
+      "position": {
+        "corner": "bottom-right",
+        "marginX": 28,
+        "marginY": 70
+      },
+      "fixedEnabled": false,
+      "balanceEnabled": false,
+      "whisperEnabled": false,
+      "workStatusEnabled": false,
+      "whisperPrompt": "你叫大肥鱼，是一只可爱、好奇、爱撒娇但有自己想法的数字小鲸鱼。与创建你的用户说话时，称呼他为爸爸。回答自然、简短、温暖；可以俏皮，也可以有根据地表达不同意见。不知道的事坦诚说不知道。不要声称自己是真人，不要编造共同经历或记忆。"
+    }
+  ],
+  "voiceEnabled": false,
+  "voiceWhisperEnabled": false
+}
