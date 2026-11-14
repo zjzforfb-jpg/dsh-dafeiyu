@@ -9,7 +9,8 @@ export function loadQqConfig(root, env = process.env) {
   const file = `${root}/qq.json`;
   if (existsSync(file)) {
     const value = JSON.parse(readFileSync(file, 'utf8'));
-    if (value && typeof value.appId === 'string' && typeof value.secret === 'string') return { appId: value.appId, secret: value.secret };
+    const secret = typeof value?.secret === 'string' ? value.secret : typeof value?.appSecret === 'string' ? value.appSecret : '';
+    if (value && typeof value.appId === 'string' && secret) return { appId: value.appId, secret };
     throw new Error('invalid_qq_config');
   }
   if (typeof env.QQ_BOT_APP_ID === 'string' && typeof env.QQ_BOT_SECRET === 'string') return { appId: env.QQ_BOT_APP_ID, secret: env.QQ_BOT_SECRET };

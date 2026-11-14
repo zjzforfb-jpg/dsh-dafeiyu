@@ -41,7 +41,7 @@ npm run connect:qq-bind
 ```bash
 mkdir -p runtime/connect
 cat > runtime/connect/qq.json <<'JSON'
-{ "appId": "你的AppID", "secret": "你的AppSecret" }
+{ "appId": "你的AppID", "secret": "你的AppSecret" }   # 扫码写入的是 "appSecret"，两种字段都认
 JSON
 chmod 600 runtime/connect/qq.json
 ```
