@@ -16,7 +16,7 @@ const HANGUP_HELP = '通话已挂断。';
 export class QqService {
   constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch, groupReplyRate = 0.08, groupCooldownMs = 90000, groupNameCooldownMs = 25000, random = Math.random }) {
     initQq(db);
-    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort, groupReplyRate, groupCooldownMs, groupNameCooldownMs, random });
+    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort, groupReplyRate, groupCooldownMs, groupNameCooldownMs, random, messageUrl: null });
     this.ambientAt = new Map();
     this.calls = new CallSessions({ timeoutMs: callTimeoutMs, now });
     this.gateway = gateway ?? new QqGateway({ api, WebSocketImpl, onEvent: event => this.handle(event), onStatus: status => log({ qq: status }) });
@@ -40,11 +40,13 @@ export class QqService {
     return { peers: peers(this.db), calls: this.calls.list(), usage: usage(this.db, dayKey(this.now())) };
   }
 
+  setMessageUrl(url) { if (typeof url === 'string' && /^https?:\/\//u.test(url)) this.messageUrl = url; }
+
   publish(eventKey, { phase, message, activity = 'chat' }) {
     if (!this.memory || !this.home) return;
     void publishDesktopActivity({
       db: this.memory, home: this.home, port: this.petPort, eventKey,
-      event: { source: 'conversation', activity, phase, message },
+      event: { source: 'conversation', activity, phase, message, ...(this.messageUrl ? { url: this.messageUrl } : {}) },
     }).catch(() => {});
   }
 

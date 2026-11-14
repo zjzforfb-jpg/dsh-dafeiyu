@@ -10,6 +10,8 @@ import { loadQqConfig, QqApi } from './qq/api.mjs';
 import { openQqMemory } from './qq/memory.mjs';
 import { QqService } from './qq/service.mjs';
 import { CALL_PAGE, CallService } from './call/service.mjs';
+import { buildFeed } from './messages/feed.mjs';
+import { MESSAGES_PAGE } from './messages/page.mjs';
 import { peer as qqPeer, savePeer as saveQqPeer, peers as qqPeers } from './qq/store.mjs';
 import { LocalVoice } from './voice/local.mjs';
 
@@ -65,7 +67,9 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     if (path.startsWith('/ilink/bind/') && await ilink.public(req,res,path,body,server.address().port)) return;
     if (path === '/health' && req.method === 'GET') return json(res, 200, { ok: true, service: 'DaFeiYu Connect', version: '0.3' });
     if (path === '/call' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(CALL_PAGE); }
+    if (path === '/messages' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(MESSAGES_PAGE); }
     if (!equal(req.headers.authorization, `Bearer ${config.adminToken}`)) return json(res, 401, { error: 'unauthorized' });
+    if (path === '/messages/feed' && req.method === 'GET') { const params = new URL(req.url, 'http://localhost').searchParams; return json(res, 200, { items: buildFeed(db, Number(params.get('limit') ?? 60)) }); }
     if (path.startsWith('/ilink/')) return ilink.admin(req,res,path,body,server.address().port);
     if (path.startsWith('/qq/')) {
       if (!qq) return json(res, 503, { error: qqError ?? 'qq_not_configured' });
@@ -206,5 +210,6 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   }, 5000);
   timer.unref();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  qq?.setMessageUrl(`http://127.0.0.1:${server.address().port}/messages?token=${config.adminToken}`);
   return { port: server.address().port, config, close: async () => { await qq?.close(); qqMemory?.close(); await ilink.close(); calls.close(); clearInterval(timer); for (const ws of callWss.clients) ws.terminate(); for (const ws of wss.clients) ws.terminate(); callWss.close(); await new Promise(r => wss.close(r)); server.close(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); db.close(); } };
 }

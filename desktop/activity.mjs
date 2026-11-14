@@ -48,7 +48,8 @@ function normalizeEvent(event) {
   const message = typeof event?.message === 'string' && event.message.trim()
     ? event.message.trim().slice(0, 120)
     : (phase === 'error' ? copy.error : copy[phase]) ?? copy.done;
-  return { source, activity, phase, message, animation: ANIMATIONS[activity] };
+  const url = typeof event?.url === 'string' && /^https?:\/\//u.test(event.url.trim()) ? event.url.trim().slice(0, 500) : undefined;
+  return { source, activity, phase, message, animation: ANIMATIONS[activity], url };
 }
 
 async function postPet({ port, token, endpoint, body }) {
@@ -84,7 +85,7 @@ export async function publishDesktopActivity({ db, home, port = 3108, event, eve
     const state = JSON.parse(readFileSync(join(home, 'dsh-pet', 'standalone-runtime.json'), 'utf8'));
     await postPet({ port, token: state.token, endpoint: 'anim', body: { name: normalized.animation } });
     if (event?.bubble !== false) {
-      await postPet({ port, token: state.token, endpoint: 'broadcast', body: { text: normalized.message, duration: 6500, anim: false } });
+      await postPet({ port, token: state.token, endpoint: 'broadcast', body: { text: normalized.message, duration: 6500, anim: false, ...(normalized.url ? { url: normalized.url } : {}) } });
     }
     db.prepare("UPDATE desktop_activity_events SET delivered = 1, delivery_error = NULL, delivered_at = datetime('now') WHERE id = ?").run(row.id);
     return { ok: true, activity: normalized.activity, phase: normalized.phase };

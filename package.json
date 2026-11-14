@@ -48,7 +48,8 @@
     "connect:ilink": "node scripts/connect.mjs ilink",
     "connect:qq": "node scripts/qq.mjs",
     "connect:call": "node scripts/call.mjs",
-    "connect:qq-bind": "node scripts/qq-bind.mjs"
+    "connect:qq-bind": "node scripts/qq-bind.mjs",
+    "connect:messages": "node scripts/messages.mjs"
   },
   "dependencies": {
     "@tencent-connect/qqbot-connector": "^1.2.0",
