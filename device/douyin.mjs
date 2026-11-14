@@ -392,34 +392,46 @@ export async function sendInCurrentComposer(serial, text, { dryRun = false } = {
 }
 
 /** 给“我”的作品评论区点赞（回心）：打开自己的第一个作品 → 评论区 → 逐行点右侧的 ♡。 */
-export async function likeBackComments(serial, { max = 12, gapMs = 700 } = {}) {
-  await adbShell(serial, 'input tap 1173 2769'); // 我
-  await sleepMs(1800);
-  let nodes = await dumpUi(serial);
-  const tiles = worksTiles(nodes);
-  if (!tiles.length) return { liked: 0, error: 'no_works' };
-  await tapPoint(serial, { x: tiles[0].bounds.cx, y: tiles[0].bounds.y + Math.round(tiles[0].bounds.h * 0.38) });
-  await sleepMs(2200);
-  await openCommentsSmart(serial);
-  await sleepMs(1200);
-  nodes = await dumpUi(serial);
-  const panelOpen = nodes.some((n) => /评论\s*\d+|展开\d+条回复|作者回复过/u.test(n.text ?? ''));
-  if (!panelOpen) return { liked: 0, error: 'comment_panel_not_open' };
-  const comments = nodes
-    .filter((n) => n.cls.includes('TextView') && n.text && n.text.length >= 6 && n.bounds.w > 380 && n.bounds.h < 200)
-    .sort((a, b) => a.bounds.y - b.bounds.y);
+/** 互动消息页：给「赞了你的图文」回赞（点头像右下角红心），并给评论点「赞」。 */
+export async function likeBackComments(serial, { max = 12, gapMs = 900, dryRun = true } = {}) {
+  await adbShell(serial, 'am start -n com.ss.android.ugc.aweme/.splash.SplashActivity');
+  await sleepMs(4000);
+  let nodes = null;
+  let pageOn = false;
+  for (let attempt = 0; attempt < 3 && !pageOn; attempt += 1) {
+    await adbShell(serial, 'input keyevent 4'); // 先退出播放/子页
+    await sleepMs(700);
+    await adbShell(serial, 'input tap 940 2757'); // 消息 tab
+    await sleepMs(1800);
+    await adbShell(serial, 'input tap 277 692'); // 互动消息
+    await sleepMs(2400);
+    nodes = await dumpUi(serial);
+    pageOn = nodes.some((n) => `${n.text ?? ''}${n.desc ?? ''}`.includes('互动消息'));
+  }
+  if (!pageOn) return { liked: 0, error: 'interactions_not_open' };
+
+  const rows = nodes.filter((n) => /赞了你的图文/u.test(`${n.desc ?? ''}${n.text ?? ''}`));
+  const commentRows = nodes.filter((n) => /评论了你/u.test(`${n.desc ?? ''}${n.text ?? ''}`));
   let liked = 0;
-  const seen = new Set();
-  for (const row of comments) {
-    const key = `${row.bounds.y}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (row.bounds.y < 900) continue;
-    await tapPoint(serial, { x: 1246, y: row.bounds.cy });
+  let commentedLikes = 0;
+
+  for (const row of rows.slice(0, max)) {
+    // 头像右下角的红心：头像 FrameLayout 在行内左侧 56..236
+    const avatarY = row.bounds.y + Math.round(row.bounds.h * 0.55);
+    if (!dryRun) await tapPoint(serial, { x: 196, y: avatarY });
     liked += 1;
     await sleepMs(gapMs);
-    if (liked >= max) break;
   }
-  await adbShell(serial, 'input keyevent BACK');
-  return { liked };
+
+  for (const row of commentRows.slice(0, max)) {
+    // 评论行只点「赞」按钮（在「回复评论」右侧）
+    const btn = nodes.find((n) => n.bounds && n.bounds.y > row.bounds.y && n.bounds.y < row.bounds.y + row.bounds.h && (n.text ?? '').trim() === '赞');
+    if (!btn) continue;
+    if (!dryRun) await tapPoint(serial, { x: btn.bounds.cx, y: btn.bounds.cy });
+    commentedLikes += 1;
+    await sleepMs(gapMs);
+  }
+
+  return { liked, commentLikes: commentedLikes, rows: rows.length, commentRows: commentRows.length };
 }
+

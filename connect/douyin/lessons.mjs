@@ -31,3 +31,5 @@ export function lessonsPrompt(file, limit = 8) {
   const text = formatLessons(file, limit);
   return text ? `你踩过这些坑，操作时先绕开：\n${text}` : '';
 }
+
+// 界面速查：docs/DOUYIN_UI.md（爸爸 2026-11-14 教学整理）

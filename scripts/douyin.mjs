@@ -184,7 +184,7 @@ async function main() {
   }
 
   if (has('like-back')) {
-    const result = await likeBackComments(serial, { max: Number(option('max', '12')) });
+    const result = await likeBackComments(serial, { max: Number(option('max', '12')), dryRun: !has('confirm') });
     console.log(JSON.stringify(result));
     return;
   }
