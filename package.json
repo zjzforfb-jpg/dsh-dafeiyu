@@ -52,7 +52,8 @@
     "connect:messages": "node scripts/messages.mjs",
     "connect:sound": "node scripts/sound.mjs",
     "connect:qq-call": "node scripts/qq-call.mjs",
-    "connect:qq-answer": "node scripts/qq-answer.mjs"
+    "connect:qq-answer": "node scripts/qq-answer.mjs",
+    "douyin": "node scripts/douyin.mjs"
   },
   "dependencies": {
     "@tencent-connect/qqbot-connector": "^1.2.0",
