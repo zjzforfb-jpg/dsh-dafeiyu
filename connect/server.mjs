@@ -32,7 +32,7 @@ async function body(req) {
 }
 const iqPeer = data => Boolean(data) && ['c2c', 'group'].includes(data.kind) && typeof data.id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(data.id);
 const allowedQqPeer = (db, kind, id) => { const value = qqPeer(db, kind, id); return Boolean(value?.enabled && value.autoReply); };
-export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, askQq, askCall, voiceRoot, home = null, qq: qqEnabled = true }) {
+export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, askQq, askCall, askCallStream = null, voiceRoot, home = null, qq: qqEnabled = true }) {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(root, 'connect.sqlite'));
   chmodSync(join(root, 'connect.sqlite'), 0o600);
