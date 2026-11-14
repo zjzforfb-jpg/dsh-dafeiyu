@@ -6,6 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IlinkGateway } from './ilink/gateway.mjs';
 import { initInbox, contacts, policy, saveContact, acceptDeviceEvent, eventRows } from './inbox.mjs';
+import { loadQqConfig, QqApi } from './qq/api.mjs';
+import { QqService } from './qq/service.mjs';
+import { peer as qqPeer, savePeer as saveQqPeer, peers as qqPeers } from './qq/store.mjs';
+import { LocalVoice } from './voice/local.mjs';
 
 export const APPS = Object.freeze({ settings: 'com.android.settings', wechat: 'com.tencent.mm', douyin: 'com.ss.android.ugc.aweme', companion: 'com.dafeiyu.companion' });
 export function loadConnectConfig(root) {
@@ -22,7 +26,9 @@ async function body(req) {
   let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 16384) throw new Error('request too large'); }
   return JSON.parse(raw);
 }
-export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, voiceRoot }) {
+const iqPeer = data => Boolean(data) && ['c2c', 'group'].includes(data.kind) && typeof data.id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(data.id);
+const allowedQqPeer = (db, kind, id) => { const value = qqPeer(db, kind, id); return Boolean(value?.enabled && value.autoReply); };
+export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, askQq, voiceRoot, qq: qqEnabled = true }) {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(root, 'connect.sqlite'));
   chmodSync(join(root, 'connect.sqlite'), 0o600);
@@ -33,6 +39,16 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   initInbox(db);
   db.prepare("DELETE FROM communication_events WHERE created_at < datetime('now','-7 days')").run();
   const ilink = new IlinkGateway({db,root,voiceRoot,client:ilinkClient,ask:askIlink});
+  let qq = null, qqError = null;
+  if (qqEnabled) {
+    try {
+      const credentials = loadQqConfig(root);
+      if (credentials) {
+        qq = new QqService({ db, voice: new LocalVoice({ root: voiceRoot }), api: new QqApi(credentials), ask: askQq ?? (async () => { throw new Error('qq_brain_not_configured'); }), WebSocketImpl: WebSocket, log: value => console.error(JSON.stringify(value)) });
+        qq.start().catch(error => { qqError = error.message; });
+      }
+    } catch (error) { qqError = error.message; }
+  }
   const sessions = new Map();
   const sendPolicy = id => {
     const ws = sessions.get(id);
@@ -45,6 +61,47 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     if (path === '/health' && req.method === 'GET') return json(res, 200, { ok: true, service: 'DaFeiYu Connect', version: '0.3' });
     if (!equal(req.headers.authorization, `Bearer ${config.adminToken}`)) return json(res, 401, { error: 'unauthorized' });
     if (path.startsWith('/ilink/')) return ilink.admin(req,res,path,body,server.address().port);
+    if (path.startsWith('/qq/')) {
+      if (!qq) return json(res, 503, { error: qqError ?? 'qq_not_configured' });
+      if (path === '/qq/status' && req.method === 'GET') return json(res, 200, { running: true, ...qq.status() });
+      if (path === '/qq/peers' && req.method === 'GET') return json(res, 200, { peers: qqPeers(db) });
+      if (path === '/qq/peers' && req.method === 'POST') {
+        try { saveQqPeer(db, await body(req)); return json(res, 200, { ok: true }); }
+        catch { return json(res, 400, { error: 'invalid_qq_peer' }); }
+      }
+      if (path === '/qq/call' && req.method === 'POST') {
+        try {
+          const data = await body(req);
+          if (!iqPeer(data)) return json(res, 400, { error: 'invalid_qq_peer' });
+          if (data.action === 'start') { qq.calls.start(data.kind, data.id); return json(res, 200, { ok: true, calls: qq.calls.list() }); }
+          if (data.action === 'end') return json(res, 200, { ok: true, ended: qq.calls.end(data.kind, data.id) });
+          return json(res, 400, { error: 'invalid_qq_action' });
+        } catch { return json(res, 400, { error: 'invalid_request' }); }
+      }
+      if (path === '/qq/messages' && req.method === 'GET') return json(res, 200, { messages: qq.messages() });
+      if (path === '/qq/send' && req.method === 'POST') {
+        try {
+          const data = await body(req);
+          if (!iqPeer(data) || typeof data.content !== 'string' || !data.content.trim()) return json(res, 400, { error: 'invalid_qq_message' });
+          if (!allowedQqPeer(db, data.kind, data.id)) return json(res, 403, { error: 'qq_peer_not_allowed' });
+          const result = await qq.api.sendText({ kind: data.kind, id: data.id, content: data.content });
+          return json(res, 200, { ok: true, id: result.id ?? null });
+        } catch (error) { return json(res, 502, { error: 'qq_send_failed' }); }
+      }
+      if (path === '/qq/voice' && req.method === 'POST') {
+        try {
+          const data = await body(req);
+          if (!iqPeer(data) || typeof data.text !== 'string' || !data.text.trim()) return json(res, 400, { error: 'invalid_qq_message' });
+          if (!allowedQqPeer(db, data.kind, data.id)) return json(res, 403, { error: 'qq_peer_not_allowed' });
+          const { createHash } = await import('node:crypto');
+          const key = createHash('sha256').update(`${Date.now()}:${data.text}`).digest('hex');
+          const audio = await qq.voice.synthesize(key, data.text);
+          const result = await qq.api.sendVoice({ kind: data.kind, id: data.id, silk: audio.silk, fileName: '大肥鱼语音回复.silk' });
+          return json(res, 200, { ok: true, duration_ms: audio.duration_ms, id: result.id ?? null });
+        } catch (error) { return json(res, 502, { error: error.message?.startsWith('daily_') ? error.message : 'qq_voice_failed' }); }
+      }
+      return json(res, 404, { error: 'not_found' });
+    }
     if (path === '/devices' && req.method === 'GET') return json(res, 200, { devices: snapshot() });
     if (path === '/contacts' && req.method === 'GET') return json(res, 200, { contacts: contacts(db) });
     if (path === '/contacts' && req.method === 'POST') {
@@ -136,5 +193,5 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   }, 5000);
   timer.unref();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  return { port: server.address().port, config, close: async () => { await ilink.close(); clearInterval(timer); for (const ws of wss.clients) ws.terminate(); await new Promise(r => wss.close(r)); await new Promise(r => server.close(r)); db.close(); } };
+  return { port: server.address().port, config, close: async () => { await qq?.close(); await ilink.close(); clearInterval(timer); for (const ws of wss.clients) ws.terminate(); await new Promise(r => wss.close(r)); await new Promise(r => server.close(r)); db.close(); } };
 }

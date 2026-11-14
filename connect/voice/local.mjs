@@ -20,8 +20,13 @@ export class LocalVoice {
   async transcribe(row,signal){
     const voice=JSON.parse(row.media_json);
     if(!voice.media&&(typeof voice.text==='string')&&voice.text.trim())return {text:voice.text.trim().slice(0,4000),source:'ilink_voice_transcript'};
-    const dir=this.dir(row.id),input=join(dir,'incoming.audio'),wav=join(dir,'incoming.wav');
-    const bytes=await this.transport.download(voice,signal);writeFileSync(input,bytes,{mode:0o600});
+    const bytes=await this.transport.download(voice,signal);
+    return this.transcribeBytes(row.id,bytes,signal);
+  }
+  async transcribeBytes(id,bytes,signal){
+    if(!Buffer.isBuffer(bytes)||!bytes.length)throw new Error('voice_empty_audio');
+    const dir=this.dir(id),input=join(dir,'incoming.audio'),wav=join(dir,'incoming.wav');
+    writeFileSync(input,bytes,{mode:0o600});
     let source=input;
     const isPcmSilk=isSilk(bytes);
     const isAudio=bytes.subarray(0,3).toString()==='ID3'||(bytes[0]===255&&(bytes[1]&224)===224)||bytes.subarray(0,4).toString()==='OggS'||(bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WAVE');
