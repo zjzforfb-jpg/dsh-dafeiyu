@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createVad } from '../connect/sound/vad.mjs';
+import { callActive, parseWindowLine } from '../connect/sound/callmode.mjs';
 
 const RATE = 16000;
 const FRAME = RATE / 50; // 20ms
@@ -74,4 +75,12 @@ test('frames split across chunks are reassembled', () => {
   }
   vad.push(silence(40));
   assert.equal(heard.length, 1);
+});
+
+test('call windows are detected from WeChat window titles', () => {
+  // titles come from callwatch.swift, joined by |
+  assert.equal(callActive(parseWindowLine('微信|语音聊天')), true);
+  assert.equal(callActive(parseWindowLine('微信')), false);
+  assert.equal(callActive(parseWindowLine('')), false);
+  assert.equal(callActive(parseWindowLine('微信|视频通话|文件传输助手')), true);
 });

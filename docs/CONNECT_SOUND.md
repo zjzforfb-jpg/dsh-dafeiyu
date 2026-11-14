@@ -124,3 +124,28 @@ log show --last 2m --predicate 'process == "WeChat"' --style compact | \
 - 流式 ASR（whisper-stream 滑动窗口）把转写从 1–2s 压到 0.3s 级。
 - 按 App 路由（Loopback）可只取微信进程的声音，避免系统提示音干扰。
 - LiveKit/WebRTC 是另一条「App 内通话」路线，接不了微信来电，两条可以并行。
+
+## 一键通话模式与呼入检测（2026-11-14 下午）
+
+```bash
+node scripts/sound.mjs --call      # 立刻进入通话模式：切设备 + 起桥；通话窗口消失后自动退出并恢复
+node scripts/sound.mjs --watch     # 待机守护：检测到微信/QQ 通话窗口才自动进入，结束后自动恢复
+node scripts/sound.mjs --invite    # 让大肥鱼发微信"给我打个电话"（走手机 ADB，需连数据线）
+node scripts/sound.mjs --contacts wechat=爸爸 qq=爸爸   # 记住以后呼叫谁（存 runtime/sound/contacts.json）
+```
+
+- 检测方式：`connect/sound/callwatch.swift` 编译成 `runtime/sound/bin/callwatch`，每秒用
+  CGWindowList 读一次微信/QQ 的窗口标题；出现「语音聊天 / 视频聊天 / 语音通话 / 视频通话」
+  即判定通话开始，消失即结束。不需要辅助功能权限。
+- `--watch` 只在通话窗口出现时切设备、起桥，通话结束自动 `--restore`，平时不影响 Mac 音频。
+- `--invite` 是"大肥鱼主动呼叫"的落地方式：个人微信/QQ 没有呼叫 API（官方 iLink 机器人只有
+  语音条，QQ 机器人没有 RTC），所以做成"大肥鱼发消息请你打电话过来 + 它自动接听"。
+
+### 为什么不能让大肥鱼直接拨出去
+
+| 通道 | 主动拨号可行性 |
+| --- | --- |
+| 微信 Mac App | 没有开放接口；辅助功能只能拿到窗口按钮（聊天区是自绘，拿不到联系人和呼叫按钮） |
+| 微信 iLink 机器人 | 只能发文字/语音条，没有呼叫能力 |
+| QQ 官方机器人 | 发送语音条可以，拨打 QQ 语音电话不行（无 RTC/拨号接口） |
+| 自建入口 | 可以做 WebRTC/LiveKit 的"App 内通话"，但接不到微信来电（另一条路） |
