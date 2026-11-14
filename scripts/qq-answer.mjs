@@ -48,12 +48,32 @@ function startBridge() {
   return child.pid;
 }
 
+function ocrCaller(call) {
+  try {
+    const bins = ensureBinaries(base);
+    const out = execFileSync(bins.ocr ?? `${base}/runtime/macui/bin/ocr`, [String(call.id)], { encoding: 'utf8' });
+    const text = out.replace(/\s+/gu, ' ');
+    if (/小朋友/u.test(text)) return { label: '妈妈', name: '小朋友' };
+    if (/七海/u.test(text)) return { label: '爸爸', name: '七海' };
+    return { label: '对方', name: '' };
+  } catch { return { label: '对方', name: '' }; }
+}
+
+function writeCaller(info) {
+  try {
+    mkdirSync(`${base}/runtime/sound`, { recursive: true });
+    writeFileSync(`${base}/runtime/sound/caller.json`, JSON.stringify({ ...info, at: new Date().toISOString() }, null, 2));
+  } catch {}
+}
+
 async function main() {
   const bins = ensureBinaries(base);
   let active = false;
 
   const enter = async (call) => {
-    console.log(`☎ 收到来电（窗口 ${call.id}），切声卡 + 起桥 + 接听…`);
+    const caller = ocrCaller(call);
+    writeCaller(caller);
+    console.log(`☎ 收到来电（窗口 ${call.id}，来电话的是${caller.label}${caller.name ? `·${caller.name}` : ''}），切声卡 + 起桥 + 接听…`);
     runSound('--enable');
     startBridge();
     const accepted = await acceptIncoming(bins);

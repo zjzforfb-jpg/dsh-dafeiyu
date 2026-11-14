@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createVad } from './vad.mjs';
 
@@ -29,6 +30,14 @@ const SCRIPT = join(import.meta.dirname, 'audio.py');
  * MiniMax PCM back into a virtual output device (WeChat's microphone = BlackHole 2ch).
  * Half-duplex with barge-in: when爸爸 starts talking the current reply is cancelled.
  */
+function readCaller(root = process.cwd()) {
+  try {
+    const raw = readFileSync(join(root, 'runtime/sound/caller.json'), 'utf8');
+    const data = JSON.parse(raw);
+    return { label: data.label ?? '对方', name: data.name ?? '' };
+  } catch { return { label: '对方', name: '' }; }
+}
+
 export class SoundBridge {
   constructor({
     voice,
@@ -145,9 +154,10 @@ export class SoundBridge {
       const wav = pcmToWav(normalizePcm(pcm), 16000);
       const result = await this.voice.transcribeBytes(id, wav, controller.signal);
       if (!result.text) return;
-      this.log(`爸爸说：${result.text}`);
+      const caller = readCaller(this.root);
+      this.log(`${caller.label}说：${result.text}`);
       this.onStatus({ state: 'thinking', text: result.text });
-      const reply = await this.ask({ text: result.text, history: this.history.slice(-8), signal: controller.signal });
+      const reply = await this.ask({ text: result.text, history: this.history.slice(-8), signal: controller.signal, speaker: caller.label });
       if (!reply) return;
       this.log(`大肥鱼：${reply}`);
       this.history.push({ role: 'user', content: result.text }, { role: 'assistant', content: reply });

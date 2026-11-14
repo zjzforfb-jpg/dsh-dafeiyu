@@ -95,21 +95,30 @@ export const ACTIONS = {
     },
   },
   'qq.call': {
-    label: '给爸爸打 QQ 语音电话',
+    label: '给爸爸打电话（QQ 七海）',
     async run({ root }) {
       const { spawn } = await import('node:child_process');
-      const child = spawn('node', ['scripts/qq-call.mjs', '--keep'], { cwd: root, detached: true, stdio: 'ignore' });
+      const child = spawn('node', ['scripts/qq-call.mjs', '--keep', '--contact', '七海'], { cwd: root, detached: true, stdio: 'ignore' });
       child.unref();
-      return '正在给七海拨 QQ 语音，接通后我会自己说话。';
+      return '正在给爸爸（QQ 七海）拨语音，接通后我会自己说话。';
+    },
+  },
+  'qq.call_mom': {
+    label: '给妈妈打电话（QQ 小朋友）',
+    async run({ root }) {
+      const { spawn } = await import('node:child_process');
+      const child = spawn('node', ['scripts/qq-call.mjs', '--keep', '--contact', '小朋友'], { cwd: root, detached: true, stdio: 'ignore' });
+      child.unref();
+      return '正在给妈妈（QQ 小朋友）拨语音，接通后我会自己说话。';
     },
   },
   'wechat.call': {
-    label: '给妈妈打微信语音电话',
+    label: '给妈妈打电话（微信 敢敢不憨了）',
     async run({ root }) {
       const { spawn } = await import('node:child_process');
-      const child = spawn('node', ['scripts/wechat-call.mjs', '--keep'], { cwd: root, detached: true, stdio: 'ignore' });
+      const child = spawn('node', ['scripts/wechat-call.mjs', '--keep', '--contact', '敢敢不憨了'], { cwd: root, detached: true, stdio: 'ignore' });
       child.unref();
-      return '正在给「敢敢不憨了」拨微信语音，接通后我会自己说话。';
+      return '正在给妈妈（微信 敢敢不憨了）拨语音，接通后我会自己说话。';
     },
   },
   'qq.hangup': {

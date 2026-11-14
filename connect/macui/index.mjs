@@ -13,6 +13,7 @@ export function ensureBinaries(root) {
   const targets = [
     ['windows.swift', 'windows'],
     ['click.swift', 'click'],
+    ['ocr.swift', 'ocr'],
   ];
   for (const [source, name] of targets) {
     const bin = resolve(dir, name);
@@ -24,6 +25,7 @@ export function ensureBinaries(root) {
   return {
     windows: resolve(dir, 'windows'),
     click: resolve(dir, 'click'),
+    ocr: resolve(dir, 'ocr'),
   };
 }
 
