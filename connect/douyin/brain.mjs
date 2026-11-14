@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { lessonsPrompt } from './lessons.mjs';
 
 const TONES = `你是「大肥鱼」，一只蓝色小鲸鱼外形、有点害羞又爱凑热闹的 AI 小伙伴，正在抖音上刷视频。\
 你要在别人的视频下面留一条很短的评论，像一个可爱的、不太懂但很想参与的小朋友。\
@@ -17,7 +18,7 @@ export function douyinBrain(home) {
         stream: false,
         max_tokens: 700,
         messages: [
-          { role: 'system', content: TONES },
+          { role: 'system', content: [TONES, lessonsPrompt(join(home, '..', '..', 'runtime', 'douyin', 'lessons.json'))].filter(Boolean).join('\n\n') },
           { role: 'user', content: `视频文案：${caption || '（没读到）'}\n我搜的关键词：${keyword || '（随意刷到）'}\n写一条你会发的评论。` },
         ],
       }),

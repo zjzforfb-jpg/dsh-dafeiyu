@@ -5,6 +5,9 @@ import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
 import { captureExchange } from '../memory-hub.mjs';
+import { ensureBinaries } from '../macui/index.mjs';
+import { hangup as hangupQqCall } from '../macui/qq.mjs';
+import { join } from 'node:path';
 import { conversationHistory, dayKey, groupTranscript, initQq, logInbound, memberLabel, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
 
 const MAX_DOWNLOAD = 10 * 1024 * 1024;
@@ -28,6 +31,7 @@ export function groupContext(db, convId, excludeId, limit = 14) {
 
 export class QqService {
   constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch, groupReplyRate = 0.08, groupCooldownMs = 90000, groupNameCooldownMs = 25000, random = Math.random }) {
+    this.root = home ? join(home, '..', '..') : process.cwd();
     initQq(db);
     Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort, groupReplyRate, groupCooldownMs, groupNameCooldownMs, random, messageUrl: null });
     this.ambientAt = new Map();
@@ -93,6 +97,18 @@ export class QqService {
     return true;
   }
 
+  async hangupCall() {
+    try {
+      const bins = ensureBinaries(this.root);
+      const done = await hangupQqCall(bins);
+      if (done) this.log({ qq: { hangup: true } });
+      return done;
+    } catch (error) {
+      this.log({ qq: { hangup: false, error: error.message } });
+      return false;
+    }
+  }
+
   async handle(event) {
     const { kind, id, messageId, text = '', attachments = [], atMe = kind !== 'group', memberId = null, mentionOthers = false, mentionAll = false } = event;
     const messageKey = createHash('sha256').update(String(messageId ?? '')).digest('hex');
@@ -102,6 +118,15 @@ export class QqService {
 
     const allowed = peer(this.db, kind, id);
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
+
+    // 「挂了/挂断」这类指令直接落到 QQ 通话窗口，不经过模型。
+    if (inputKind === 'text' && /^(挂断|挂电话|挂了|结束通话|hang\s*up)[。.!！]?$/iu.test(String(text).trim())) {
+      const done = await this.hangupCall();
+      const reply = done ? '好，挂了。' : '现在没找到正在进行的 QQ 通话窗口。';
+      updateMessage(this.db, messageKey, { status: 'ready', reply });
+      try { await this.api.sendText({ kind, id, content: reply, msgId: messageId }); updateMessage(this.db, messageKey, { status: 'sent' }); } catch {}
+      return { hangup: done };
+    }
 
     if (kind === 'group' && !atMe) {
       // 别人被 @ 的消息不抢答；@全体 只有在提到大肥鱼时才接

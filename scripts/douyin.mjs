@@ -20,6 +20,8 @@ import {
 } from '../device/douyin.mjs';
 import { dumpUi } from '../device/uia.mjs';
 import { openHub, recordActivity } from '../connect/memory-hub.mjs';
+import { addLesson, formatLessons, loadLessons } from '../connect/douyin/lessons.mjs';
+import { join as joinPath } from 'node:path';
 import { checkComment, describeRules, LIMITS } from '../connect/douyin/compliance.mjs';
 import { loadAccounts, saveAccounts, upsertAccounts } from '../connect/douyin/accounts.mjs';
 import { douyinBrain } from '../connect/douyin/brain.mjs';
@@ -73,6 +75,7 @@ function remember(text, video) {
   saveState(state);
 }
 
+const lessonsFile = joinPath(process.cwd(), 'runtime', 'douyin', 'lessons.json');
 const args = process.argv.slice(2);
 const option = (name, fallback = '') => {
   const index = args.indexOf(`--${name}`);
@@ -81,6 +84,8 @@ const option = (name, fallback = '') => {
 const has = (name) => args.includes(`--${name}`);
 
 async function main() {
+  if (has('lessons')) { const { lessons } = loadLessons(lessonsFile); console.log(JSON.stringify(lessons.slice(-20), null, 2)); return; }
+  if (has('lesson')) { const data = addLesson(lessonsFile, { kind: option('kind', 'note'), text: option('lesson'), tags: option('tags').split(',').filter(Boolean) }); console.log(JSON.stringify({ saved: true, total: data.lessons.length }, null, 2)); return; }
   const serial = await deviceSerial();
   if (has('reset')) {
     await resetDouyin(serial);
