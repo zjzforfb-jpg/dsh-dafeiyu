@@ -42,7 +42,7 @@ export class LocalVoice {
     chmodSync(output+'.txt',0o600);
     return {text,source:'local_whisper_cpp'};
   }
-  async synthesize(id,text,signal){
+  async synthesize(id,text,signal,{silk:wantSilk=true}={}){
     const dir=this.dir(id);const plain=text.replace(/\[\[.*?\]\]/gs,'').replace(/[*`#]/g,'').trim().slice(0,240);
     if(!plain)throw new Error('voice_empty_reply');
     const input=join(dir,'reply.txt'),aiff=join(dir,'reply.aiff'),wav=join(dir,'reply.wav'),pcm=join(dir,'reply.pcm'),silk=join(dir,'reply.silk'),file=join(dir,'reply.m4a');
@@ -59,11 +59,14 @@ export class LocalVoice {
       await this.run('/usr/bin/say',['-v',this.voice,'-r','205','-o',aiff,'-f',input],signal,60000);
     }else throw new Error('unknown_tts_provider');
     await this.run(FF,['-nostdin','-hide_banner','-loglevel','error','-y','-i',source,'-t','60','-ac','1','-ar','24000','-c:a','pcm_s16le',wav],signal);
-    await this.run(FF,['-nostdin','-hide_banner','-loglevel','error','-y','-i',wav,'-f','s16le','-ac','1','-ar','24000',pcm],signal);
-    const info=await this.codec('encode',pcm,silk,signal);
+    let info={duration_ms:(statSync(wav).size-44)/2/24000*1000};
+    if(wantSilk){
+      await this.run(FF,['-nostdin','-hide_banner','-loglevel','error','-y','-i',wav,'-f','s16le','-ac','1','-ar','24000',pcm],signal);
+      info=await this.codec('encode',pcm,silk,signal);
+    }
     await this.run(FF,['-nostdin','-hide_banner','-loglevel','error','-y','-i',wav,'-c:a','aac','-b:a','64k',file],signal);
-    for(const f of [source,wav,pcm,silk,file])chmodSync(f,0o600);
-    return {duration_ms:Math.round(info.duration_ms),silk:readFileSync(silk),file:readFileSync(file),fileName:'大肥鱼语音回复.m4a',text:plain};
+    for(const f of wantSilk?[source,wav,pcm,silk,file]:[source,wav,file])chmodSync(f,0o600);
+    return {duration_ms:Math.round(info.duration_ms),silk:wantSilk?readFileSync(silk):null,file:readFileSync(file),fileName:'大肥鱼语音回复.m4a',text:plain};
   }
   artifacts(id){const dir=this.dir(id);return {silk:readFileSync(join(dir,'reply.silk')),file:readFileSync(join(dir,'reply.m4a')),fileName:'大肥鱼语音回复.m4a'};}
   status(){let tts;try{const c=this.ttsConfig();tts=c.provider==='minimax'?'minimax_'+(c.model??'speech-2.8-hd'):c.provider==='qwen3_mlx'?'qwen3_mlx_'+(c.speaker??'Serena'):c.provider==='macos_say'&&process.platform==='darwin'?'macOS_say_'+this.voice:'unavailable';}catch{tts='invalid_configuration';}return {asr:existsSync(this.model)&&existsSync(this.whisper)?'ready':'not_installed',tts,codec:'silk_wasm',audio_files:true};}

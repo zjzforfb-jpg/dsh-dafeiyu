@@ -46,7 +46,8 @@
     "connect:diagnostic": "node scripts/connect.mjs diagnostic",
     "connect:scan": "node scripts/connect.mjs scan",
     "connect:ilink": "node scripts/connect.mjs ilink",
-    "connect:qq": "node scripts/qq.mjs"
+    "connect:qq": "node scripts/qq.mjs",
+    "connect:call": "node scripts/call.mjs"
   },
   "dependencies": {
     "dsh-pet": "0.4.8",

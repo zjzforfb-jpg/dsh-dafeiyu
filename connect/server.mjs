@@ -8,6 +8,7 @@ import { IlinkGateway } from './ilink/gateway.mjs';
 import { initInbox, contacts, policy, saveContact, acceptDeviceEvent, eventRows } from './inbox.mjs';
 import { loadQqConfig, QqApi } from './qq/api.mjs';
 import { QqService } from './qq/service.mjs';
+import { CALL_PAGE, CallService } from './call/service.mjs';
 import { peer as qqPeer, savePeer as saveQqPeer, peers as qqPeers } from './qq/store.mjs';
 import { LocalVoice } from './voice/local.mjs';
 
@@ -28,7 +29,7 @@ async function body(req) {
 }
 const iqPeer = data => Boolean(data) && ['c2c', 'group'].includes(data.kind) && typeof data.id === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(data.id);
 const allowedQqPeer = (db, kind, id) => { const value = qqPeer(db, kind, id); return Boolean(value?.enabled && value.autoReply); };
-export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, askQq, voiceRoot, qq: qqEnabled = true }) {
+export async function startConnect({ root, port = 8765, config = loadConnectConfig(root), onEvent = async () => {}, ilinkClient, askIlink, askQq, askCall, voiceRoot, qq: qqEnabled = true }) {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(root, 'connect.sqlite'));
   chmodSync(join(root, 'connect.sqlite'), 0o600);
@@ -39,12 +40,14 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   initInbox(db);
   db.prepare("DELETE FROM communication_events WHERE created_at < datetime('now','-7 days')").run();
   const ilink = new IlinkGateway({db,root,voiceRoot,client:ilinkClient,ask:askIlink});
+  const localVoice = new LocalVoice({ root: voiceRoot ?? join(root, 'voice') });
+  const calls = new CallService({ voice: localVoice, ask: askCall ?? (async () => { throw new Error('call_brain_not_configured'); }), log: value => console.error(JSON.stringify(value)) });
   let qq = null, qqError = null;
   if (qqEnabled) {
     try {
       const credentials = loadQqConfig(root);
       if (credentials) {
-        qq = new QqService({ db, voice: new LocalVoice({ root: voiceRoot }), api: new QqApi(credentials), ask: askQq ?? (async () => { throw new Error('qq_brain_not_configured'); }), WebSocketImpl: WebSocket, log: value => console.error(JSON.stringify(value)) });
+        qq = new QqService({ db, voice: localVoice, api: new QqApi(credentials), ask: askQq ?? (async () => { throw new Error('qq_brain_not_configured'); }), WebSocketImpl: WebSocket, log: value => console.error(JSON.stringify(value)) });
         qq.start().catch(error => { qqError = error.message; });
       }
     } catch (error) { qqError = error.message; }
@@ -59,6 +62,7 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     const path = new URL(req.url, 'http://localhost').pathname;
     if (path.startsWith('/ilink/bind/') && await ilink.public(req,res,path,body,server.address().port)) return;
     if (path === '/health' && req.method === 'GET') return json(res, 200, { ok: true, service: 'DaFeiYu Connect', version: '0.3' });
+    if (path === '/call' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(CALL_PAGE); }
     if (!equal(req.headers.authorization, `Bearer ${config.adminToken}`)) return json(res, 401, { error: 'unauthorized' });
     if (path.startsWith('/ilink/')) return ilink.admin(req,res,path,body,server.address().port);
     if (path.startsWith('/qq/')) {
@@ -145,7 +149,14 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     } catch { return json(res, 400, { error: 'invalid request' }); }
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
+  const callWss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 });
   server.on('upgrade', (req, socket, head) => {
+    if (req.url?.startsWith('/call/ws')) {
+      const token = new URL(req.url, 'http://localhost').searchParams.get('token');
+      if (!equal(token, config.adminToken)) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
+      callWss.handleUpgrade(req, socket, head, ws => calls.attach(ws));
+      return;
+    }
     const id = req.headers['x-device-id'];
     if (req.url !== '/device' || !Object.hasOwn(config.devices, id) || !equal(req.headers.authorization, `Bearer ${config.devices[id]}`)) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
     wss.handleUpgrade(req, socket, head, ws => {
@@ -193,5 +204,5 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   }, 5000);
   timer.unref();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  return { port: server.address().port, config, close: async () => { await qq?.close(); await ilink.close(); clearInterval(timer); for (const ws of wss.clients) ws.terminate(); await new Promise(r => wss.close(r)); await new Promise(r => server.close(r)); db.close(); } };
+  return { port: server.address().port, config, close: async () => { await qq?.close(); await ilink.close(); calls.close(); clearInterval(timer); for (const ws of callWss.clients) ws.terminate(); for (const ws of wss.clients) ws.terminate(); callWss.close(); await new Promise(r => wss.close(r)); server.close(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); db.close(); } };
 }

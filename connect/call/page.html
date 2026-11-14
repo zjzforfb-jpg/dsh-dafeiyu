@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼 · 实时通话</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(1200px 800px at 20% 0%, #1b2740, #0b0f16 60%); color: #e8eef7; font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { width: min(560px, 92vw); padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 6px; font-weight: 600; }
+  #status { color: #8fa4be; margin: 0 0 18px; font-size: 13px; min-height: 20px; }
+  #toggle { width: 100%; padding: 14px; border: 1px solid #2c3b52; border-radius: 12px; background: #16233a; color: #e8eef7; font-size: 16px; cursor: pointer; }
+  #toggle.live { background: #3a1620; border-color: #7a2a3a; }
+  #meter { height: 6px; margin: 14px 0 0; border-radius: 3px; background: #142033; overflow: hidden; }
+  #meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #3fa7ff, #58e0a8); transition: width .08s linear; }
+  #log { margin-top: 18px; display: grid; gap: 10px; }
+  .row { padding: 10px 12px; border-radius: 12px; background: #101a29; border: 1px solid #1c2a3e; }
+  .row.me { background: #14243a; }
+  .row .who { font-size: 11px; color: #7c93ad; letter-spacing: .08em; margin-bottom: 2px; }
+  .row.bot { border-color: #24405a; }
+  .hint { margin-top: 14px; font-size: 12px; color: #6b809a; }
+  audio { width: 100%; margin-top: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🐟 大肥鱼 · 实时通话</h1>
+  <p id="status">点「开始通话」，允许麦克风。说完停顿一下，我就接话。</p>
+  <button id="toggle">开始通话</button>
+  <div id="meter"><i></i></div>
+  <div id="log"></div>
+  <div class="hint">半双工：我说话时先别讲，等语音条播完再继续。识别在 Mac 本地完成，音频不会上传到第三方 ASR。</div>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get('token') ?? '';
+const statusEl = document.getElementById('status');
+const toggle = document.getElementById('toggle');
+const logEl = document.getElementById('log');
+const meter = document.querySelector('#meter i');
+const SAMPLE_RATE = 16000;
+const SPEECH_THRESHOLD = 0.015;
+const SILENCE_MS = 700;
+const MIN_MS = 350;
+const MAX_MS = 12000;
+
+let socket, ctx, stream, proc, running = false, busy = false;
+let speaking = false, speechStart = 0, lastVoice = 0;
+const frames = [];
+
+function setStatus(text) { statusEl.textContent = text; }
+function addRow(who, text, cls = '') {
+  const row = document.createElement('div');
+  row.className = `row ${cls}`;
+  row.innerHTML = `<div class="who">${who}</div><div class="text"></div>`;
+  row.querySelector('.text').textContent = text;
+  logEl.append(row);
+  return row;
+}
+function b64(bytes) {
+  let out = '';
+  const view = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < view.length; i += 0x8000) out += String.fromCharCode(...view.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+function downsample(float32, from, to) {
+  if (from === to) return float32;
+  const ratio = from / to;
+  const length = Math.floor(float32.length / ratio);
+  const out = new Float32Array(length);
+  for (let i = 0; i < length; i += 1) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(float32.length, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (let j = start; j < end; j += 1) sum += float32[j];
+    out[i] = sum / Math.max(1, end - start);
+  }
+  return out;
+}
+function toPcm16(float32) {
+  const out = new Int16Array(float32.length);
+  for (let i = 0; i < float32.length; i += 1) {
+    const v = Math.max(-1, Math.min(1, float32[i]));
+    out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  return out;
+}
+function sendSegment(float32, sampleRate) {
+  if (!socket || socket.readyState !== 1 || busy) return;
+  const pcm = toPcm16(downsample(float32, sampleRate, SAMPLE_RATE));
+  if (pcm.length < SAMPLE_RATE * MIN_MS / 1000) return;
+  busy = true;
+  setStatus('听到了，正在转写…');
+  socket.send(JSON.stringify({ type: 'audio', sampleRate: SAMPLE_RATE, data: b64(pcm) }));
+}
+function connect() {
+  socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/call/ws?token=${encodeURIComponent(token)}`);
+  socket.onopen = () => { setStatus('已连接，说话吧。'); toggle.textContent = '结束通话'; toggle.classList.add('live'); };
+  socket.onclose = () => { setStatus('连接已断开'); stopLocal(); };
+  socket.onmessage = event => {
+    let value;
+    try { value = JSON.parse(event.data); } catch { return; }
+    if (value.type === 'transcript') { addRow('你', value.text, 'me'); setStatus('大肥鱼在想…'); }
+    else if (value.type === 'reply_text') { addRow('大肥鱼', value.text, 'bot'); setStatus('正在合成语音…'); }
+    else if (value.type === 'reply') {
+      addRow('大肥鱼', value.text, 'bot');
+      if (value.audio) {
+        const audio = new Audio(`data:${value.mime};base64,${value.audio}`);
+        audio.onended = () => { busy = false; setStatus('你说吧。'); };
+        audio.onerror = () => { busy = false; setStatus('语音播不出来，文字已显示。'); };
+        audio.play().catch(() => { busy = false; setStatus('点一下页面允许播放声音。'); });
+      } else { busy = false; setStatus('你说吧。'); }
+    } else if (value.type === 'error') {
+      busy = false;
+      if (value.error === 'call_busy') setStatus('我还在说上一句，等我一下。');
+      else if (value.error === 'voice_not_understood') setStatus('没听清，再说一次？');
+      else setStatus(`出错了：${value.error}`);
+    }
+  };
+  socket.onerror = () => setStatus('连不上通话服务，确认 Connect 在运行。');
+}
+async function startLocal() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  proc = ctx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = event => {
+    if (!running || busy) { frames.length = 0; speaking = false; return; }
+    const input = event.inputBuffer.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < input.length; i += 1) sum += input[i] * input[i];
+    const rms = Math.sqrt(sum / input.length);
+    meter.style.width = Math.min(100, Math.round(rms * 900)) + '%';
+    const now = performance.now();
+    if (rms > SPEECH_THRESHOLD) {
+      if (!speaking) { speaking = true; speechStart = now; frames.length = 0; }
+      lastVoice = now;
+      frames.push(new Float32Array(input));
+    } else if (speaking) {
+      frames.push(new Float32Array(input));
+      if (now - lastVoice > SILENCE_MS) {
+        speaking = false;
+        const length = frames.reduce((n, f) => n + f.length, 0);
+        if (now - speechStart - SILENCE_MS >= MIN_MS) {
+          const merged = new Float32Array(length);
+          let offset = 0;
+          for (const frame of frames) { merged.set(frame, offset); offset += frame.length; }
+          sendSegment(merged, ctx.sampleRate);
+        }
+        frames.length = 0;
+      } else if (now - speechStart > MAX_MS) {
+        speaking = false;
+        const length = frames.reduce((n, f) => n + f.length, 0);
+        const merged = new Float32Array(length);
+        let offset = 0;
+        for (const frame of frames) { merged.set(frame, offset); offset += frame.length; }
+        frames.length = 0;
+        sendSegment(merged, ctx.sampleRate);
+      }
+    }
+  };
+  source.connect(proc);
+  proc.connect(ctx.destination);
+}
+function stopLocal() {
+  running = false; busy = false; speaking = false; frames.length = 0;
+  try { proc?.disconnect(); } catch {}
+  try { stream?.getTracks().forEach(track => track.stop()); } catch {}
+  try { ctx?.close(); } catch {}
+  proc = stream = ctx = undefined;
+  meter.style.width = '0';
+  toggle.textContent = '开始通话';
+  toggle.classList.remove('live');
+}
+toggle.onclick = async () => {
+  if (running) { running = false; socket?.close(); stopLocal(); setStatus('已结束'); return; }
+  try {
+    running = true; busy = false;
+    await startLocal();
+    connect();
+    setStatus('已开麦，说话吧。');
+  } catch (error) {
+    running = false;
+    setStatus(`麦克风打不开：${error.message}`);
+    stopLocal();
+  }
+};
+</script>
+</body>
+</html>
