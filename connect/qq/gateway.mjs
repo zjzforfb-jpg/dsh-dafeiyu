@@ -1,15 +1,27 @@
 const INTENTS = 1 << 25; // GROUP_AND_C2C_EVENT
 
+function cleanText(value) {
+  return String(value ?? '').replace(/<@!?[^>]*>/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
+
 function normalize(dispatch) {
   const d = dispatch.d ?? {};
   if (dispatch.t === 'C2C_MESSAGE_CREATE') {
-    return { kind: 'c2c', id: d.author?.user_openid, messageId: d.id, text: typeof d.content === 'string' ? d.content.trim() : '', attachments: Array.isArray(d.attachments) ? d.attachments : [], timestamp: d.timestamp ?? null };
+    return { kind: 'c2c', id: d.author?.user_openid, messageId: d.id, text: cleanText(d.content), attachments: Array.isArray(d.attachments) ? d.attachments : [], timestamp: d.timestamp ?? null, atMe: true };
   }
-  if (dispatch.t === 'GROUP_AT_MESSAGE_CREATE') {
-    return { kind: 'group', id: d.group_openid, memberId: d.author?.member_openid, messageId: d.id, text: typeof d.content === 'string' ? d.content.trim() : '', attachments: Array.isArray(d.attachments) ? d.attachments : [], timestamp: d.timestamp ?? null };
+  if (dispatch.t === 'GROUP_AT_MESSAGE_CREATE' || dispatch.t === 'GROUP_MESSAGE_CREATE') {
+    const mentions = Array.isArray(d.mentions) ? d.mentions : [];
+    return {
+      kind: 'group', id: d.group_openid, memberId: d.author?.member_openid, messageId: d.id,
+      text: cleanText(d.content), attachments: Array.isArray(d.attachments) ? d.attachments : [],
+      timestamp: d.timestamp ?? null,
+      atMe: dispatch.t === 'GROUP_AT_MESSAGE_CREATE' || mentions.some(entry => entry && entry.bot === true),
+    };
   }
   return null;
 }
+
+export function normalizeDispatch(dispatch) { return normalize(dispatch); }
 
 export function isVoiceAttachment(attachment) {
   const type = String(attachment?.content_type ?? '').toLowerCase();

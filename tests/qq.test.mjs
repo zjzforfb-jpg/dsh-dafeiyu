@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isVoiceAttachment } from '../connect/qq/gateway.mjs';
+import { isVoiceAttachment, normalizeDispatch } from '../connect/qq/gateway.mjs';
 import { loadQqConfig, QqApi } from '../connect/qq/api.mjs';
 import { initQq, logInbound, savePeer, peer, conversationHistory, reserve, usage, dayKey } from '../connect/qq/store.mjs';
 import { CallSessions } from '../connect/qq/call.mjs';
@@ -220,4 +220,33 @@ test('QQ chat writes long-term memory, recalls it into the brain, and logs deskt
     memory.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('QQ group messages normalize mentions and only answer a fraction of ambient chatter', async () => {
+  const full = normalizeDispatch({ t: 'GROUP_MESSAGE_CREATE', d: { id: 'm-1', group_openid: 'group-openid-1', author: { member_openid: 'member-1' }, content: '今天好热 <@7A3B9C1D5E2F4A6B> 你们吃了吗', mentions: [{ id: '7A3B9C1D5E2F4A6B' }] } });
+  assert.equal(full.kind, 'group');
+  assert.equal(full.atMe, false);
+  assert.equal(full.text, '今天好热 你们吃了吗');
+  const atAll = normalizeDispatch({ t: 'GROUP_MESSAGE_CREATE', d: { id: 'm-2', group_openid: 'group-openid-1', content: '<@all> 集合', mentions: [{ id: 'bot', bot: true }] } });
+  assert.equal(atAll.atMe, true);
+  const at = normalizeDispatch({ t: 'GROUP_AT_MESSAGE_CREATE', d: { id: 'm-3', group_openid: 'group-openid-1', content: '在吗' } });
+  assert.equal(at.atMe, true);
+
+  const db = setup();
+  savePeer(db, { kind: 'group', id: 'group-openid-1', label: '家人群', enabled: true, autoReply: true, voiceReply: false });
+  let clock = TS;
+  const sent = [];
+  const build = () => new QqService({
+    db, now: () => clock, random: () => 0, groupReplyRate: 0.5, groupCooldownMs: 10000,
+    voice: fakeVoice(), ask: async () => '我在呢',
+    api: { sendText: async message => { sent.push(message); return {}; }, sendVoice: async () => ({}) },
+    gateway: { start: async () => {}, close: async () => {} },
+  });
+
+  const service = build();
+  assert.equal((await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'g-1', text: '今天吃什么', attachments: [], atMe: false })).replied, 'text');
+  clock += 1000;
+  assert.equal((await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'g-2', text: '有人吗', attachments: [], atMe: false })).ignored, 'ambient_skip');
+  assert.equal((await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'g-3', text: '大肥鱼在吗', attachments: [], atMe: true })).replied, 'text');
+  assert.equal(sent.length, 2);
 });

@@ -49,7 +49,7 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     try {
       const credentials = loadQqConfig(root);
       if (credentials) {
-        qq = new QqService({ db, voice: localVoice, api: new QqApi(credentials), ask: askQq ?? (async () => { throw new Error('qq_brain_not_configured'); }), WebSocketImpl: WebSocket, memory: qqMemory, home, log: value => console.error(JSON.stringify(value)) });
+        qq = new QqService({ db, voice: localVoice, api: new QqApi(credentials), ask: askQq ?? (async () => { throw new Error('qq_brain_not_configured'); }), WebSocketImpl: WebSocket, memory: qqMemory, home, groupReplyRate: Number(process.env.QQ_GROUP_REPLY_RATE ?? 0.08), groupCooldownMs: Number(process.env.QQ_GROUP_COOLDOWN_MS ?? 90000), log: value => console.error(JSON.stringify(value)) });
         qq.start().catch(error => { qqError = error.message; });
       }
     } catch (error) { qqError = error.message; }

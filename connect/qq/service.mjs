@@ -14,9 +14,10 @@ const CALL_HELP = '通话已开始，直接发语音或文字都行；静默 60 
 const HANGUP_HELP = '通话已挂断。';
 
 export class QqService {
-  constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch }) {
+  constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch, groupReplyRate = 0.08, groupCooldownMs = 90000, groupNameCooldownMs = 25000, random = Math.random }) {
     initQq(db);
-    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort });
+    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort, groupReplyRate, groupCooldownMs, groupNameCooldownMs, random });
+    this.ambientAt = new Map();
     this.calls = new CallSessions({ timeoutMs: callTimeoutMs, now });
     this.gateway = gateway ?? new QqGateway({ api, WebSocketImpl, onEvent: event => this.handle(event), onStatus: status => log({ qq: status }) });
     this.stopped = false;
@@ -67,8 +68,18 @@ export class QqService {
     return this.api.sendVoice({ kind, id, silk, fileName: '大肥鱼语音回复.silk', msgId });
   }
 
+  shouldJoinAmbient(kind, id, text) {
+    const key = `${kind}:${id}`;
+    const gap = this.now() - (this.ambientAt.get(key) ?? 0);
+    const named = /大肥鱼|肥鱼|鱼鱼/u.test(text);
+    if (gap < (named ? this.groupNameCooldownMs : this.groupCooldownMs)) return false;
+    if (!named && this.random() >= this.groupReplyRate) return false;
+    this.ambientAt.set(key, this.now());
+    return true;
+  }
+
   async handle(event) {
-    const { kind, id, messageId, text = '', attachments = [] } = event;
+    const { kind, id, messageId, text = '', attachments = [], atMe = kind !== 'group' } = event;
     const messageKey = createHash('sha256').update(String(messageId ?? '')).digest('hex');
     const voiceAttachment = attachments.find(isVoiceAttachment) ?? null;
     const inputKind = voiceAttachment ? 'voice' : 'text';
@@ -76,6 +87,11 @@ export class QqService {
 
     const allowed = peer(this.db, kind, id);
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
+
+    if (kind === 'group' && !atMe && !this.shouldJoinAmbient(kind, id, text)) {
+      updateMessage(this.db, messageKey, { status: 'ignored', error: 'ambient_skip' });
+      return { ignored: 'ambient_skip' };
+    }
 
     const command = text.trim();
     if (/^\/(通话|打电话)/.test(command)) {

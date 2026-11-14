@@ -74,6 +74,29 @@ npm run connect:qq block c2c <openid>   # 完全忽略
 npm run connect:qq peers                # 当前名单
 ```
 
+## 群聊（可选全量消息）
+
+默认机器人只在被 @ 时收到消息。要让它在群里「旁听」：
+
+1. 群主在手机 QQ 里：群成员 → 机器人头像 → 右上角设置 → 「机器人可获取的群聊消息范围」选**获取群内全部消息**；顺手打开「机器人主动在群聊内发言」。
+2. 群主也可以把「允许机器人获取群内全部消息」当成隐私开关，随时关掉。
+
+打开后网关会同时收到 `GROUP_AT_MESSAGE_CREATE`（@ 了它）和 `GROUP_MESSAGE_CREATE`（全量）。本项目的发言规则：
+
+| 情况 | 行为 |
+| --- | --- |
+| 被 @ | 一定回 |
+| 消息里提到「大肥鱼/肥鱼/鱼鱼」 | 一定回，25 秒冷却 |
+| 其他闲聊 | 概率加入：默认 8%，同群 90 秒冷却 |
+| 群未放行 | `held`，不回复 |
+
+可用环境变量调：`QQ_GROUP_REPLY_RATE`（0–1）、`QQ_GROUP_COOLDOWN_MS`。放行方式：先在群里说一句，然后
+
+```bash
+npm run connect:qq messages          # 拿到 group_openid
+npm run connect:qq allow group <group_openid> 家人群
+```
+
 ## 长期记忆
 
 QQ 通道与桌面/微信共用 `runtime/dsh-home/dafeiyu-memory.sqlite`（WAL，多进程可同时打开）：
