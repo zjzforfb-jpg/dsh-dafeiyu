@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { getWeather, wantsWeather, cityFromText } from '../tools/weather.mjs';
 
 const CAPABILITIES = `你能做的事（不要说自己没权限）：
+- 给爸爸打 QQ 语音电话（七海）：[DO:qq.call]；挂断：[DO:qq.hangup]
+- 给妈妈打微信语音电话（敢敢不憨了）：[DO:wechat.call]
 - 写并发布一条抖音图文（动作 douyin.publish）：先答应「我这就去写」，系统会生成图片+文案并发布
 - 回复抖音评论/互动消息（动作 douyin.reply_comments）
 - 看抖音有没有新互动（douyin.check_interactions）

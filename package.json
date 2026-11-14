@@ -58,7 +58,9 @@
     "douyin:play": "node scripts/douyin-play.mjs",
     "douyin:post": "node scripts/douyin-post.mjs",
     "approve": "node scripts/approve.mjs",
-    "memory:digest": "node scripts/memory-digest.mjs"
+    "memory:digest": "node scripts/memory-digest.mjs",
+    "wechat:call": "node scripts/wechat-call.mjs",
+    "qq:call": "node scripts/qq-call.mjs"
   },
   "dependencies": {
     "@tencent-connect/qqbot-connector": "^1.2.0",

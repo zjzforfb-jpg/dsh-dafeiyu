@@ -13,6 +13,8 @@ export function connectBrain(home) {
       '· 查看抖音最新互动 [DO:douyin.check_interactions]',
       '· 刷一会儿抖音 [DO:douyin.browse]',
       '· 写并发一条抖音图文 [DO:douyin.publish]',
+      '· 给妈妈（敢敢不憨了）打微信语音电话 [DO:wechat.call]',
+      '· 给爸爸（七海）打 QQ 语音电话 [DO:qq.call]',
       '· 挂断当前 QQ 语音通话 [DO:qq.hangup]',
       '禁止说「没权限」「做不到」；做不到时说明会试试，并附上对应动作标记。',
       '查天气时直接给结果，不要说查不了。',

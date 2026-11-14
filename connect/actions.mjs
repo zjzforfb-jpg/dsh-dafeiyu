@@ -94,6 +94,24 @@ export const ACTIONS = {
       return tail.slice(0, 160) || '图文发出去了。';
     },
   },
+  'qq.call': {
+    label: '给爸爸打 QQ 语音电话',
+    async run({ root }) {
+      const { spawn } = await import('node:child_process');
+      const child = spawn('node', ['scripts/qq-call.mjs', '--keep'], { cwd: root, detached: true, stdio: 'ignore' });
+      child.unref();
+      return '正在给七海拨 QQ 语音，接通后我会自己说话。';
+    },
+  },
+  'wechat.call': {
+    label: '给妈妈打微信语音电话',
+    async run({ root }) {
+      const { spawn } = await import('node:child_process');
+      const child = spawn('node', ['scripts/wechat-call.mjs', '--keep'], { cwd: root, detached: true, stdio: 'ignore' });
+      child.unref();
+      return '正在给「敢敢不憨了」拨微信语音，接通后我会自己说话。';
+    },
+  },
   'qq.hangup': {
     label: '挂断 QQ 通话',
     async run({ root }) {
