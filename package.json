@@ -47,9 +47,11 @@
     "connect:scan": "node scripts/connect.mjs scan",
     "connect:ilink": "node scripts/connect.mjs ilink",
     "connect:qq": "node scripts/qq.mjs",
-    "connect:call": "node scripts/call.mjs"
+    "connect:call": "node scripts/call.mjs",
+    "connect:qq-bind": "node scripts/qq-bind.mjs"
   },
   "dependencies": {
+    "@tencent-connect/qqbot-connector": "^1.2.0",
     "dsh-pet": "0.4.8",
     "qrcode": "1.5.4",
     "silk-wasm": "3.7.1",

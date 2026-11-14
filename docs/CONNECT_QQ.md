@@ -19,12 +19,24 @@
 
 ## 准备
 
-1. 到 [QQ 开放平台](https://q.qq.com/) 注册机器人（个人开发者可申请沙箱）。
-2. 拿 `AppID` 和 `AppSecret`（Secret 只显示一次）。
+1. 到 [QQ 开放平台](https://q.qq.com/#/apps) 点「创建机器人」（扫码登录即可，个人开发者能建；一键创建，立即有一条机器人发来的 QQ 消息）。
+2. 跑 `npm run connect:qq-bind` 扫码，凭据自动写入（不用手抄 Secret）。
 3. 在机器人后台开启事件订阅：**群聊 @ 机器人**、**单聊消息**（本项目只订阅 `GROUP_AND_C2C_EVENT`，intents `1<<25`）。
 4. 若后台要求 IP 白名单，把本机出口 IP 加进去。
 
-## 配置
+## 配置（扫码绑定，推荐）
+
+QQ 开放平台官方的「Agent 接入」流程就是扫码：手机 QQ 扫码后会在页面上让你选择/创建机器人，并**自动返回 AppID 与 AppSecret**（`@tencent-connect/qqbot-connector`）。本项目已封装：
+
+```bash
+npm run connect:qq-bind
+```
+
+终端会打印二维码和一个 `https://q.qq.com/qqbot/openclaw/connect.html?task_id=…` 链接；用手机 QQ 扫（或点链接打开）→ 选择要接入的机器人 → 凭据自动写入 `runtime/connect/qq.json`（0600，已 gitignore）。重绑加 `--force`。
+
+前置：如果还没有机器人，先在 [QQ 开放平台](https://q.qq.com/#/apps) 点「创建机器人」（一键即成，会给你 QQ 发条消息，头像昵称可改）。
+
+也可以手动配置：
 
 ```bash
 mkdir -p runtime/connect
@@ -69,6 +81,22 @@ npm run connect:qq peers                # 当前名单
 - `/语音 开`、`/语音 关`：开关「语音输入→语音回复」（默认开）。
 - 其他文本正常聊天；语音条会被本机 whisper 转写后再回复。
 
+## 与官方「智能体接入」的关系
+
+QQ 开放平台的 Agent 接入页面（https://bot.q.qq.com/wiki/agent-qqbot/ ）把 QQ Bot 定义成「一站式 Agent 入口」：机器人本身是空壳，真正回答问题的是接入的 Agent。官方列出 DeepSeek Harness、Workbuddy、OpenClaw、Hermes、LightVela 等接法，其中 DSH 用 `@tencent-connect/dsh-qqbot` 插件，首次启动扫码绑定。
+
+本项目走的是同一条官方链路，只是没用 DSH 插件，而是用 `@tencent-connect/qqbot-connector` 的扫码 SDK 拿凭据，再接自己写的 `connect/qq/*` 通道。好处是保留微信那套语音条、`/通话` 对讲、预算和记忆；代价是事件与消息格式由我们自己维护。
+
+两条路对比：
+
+| | 官方 dsh-qqbot 插件 | 本项目 connect/qq |
+| --- | --- | --- |
+| 接入步骤 | `npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqbot` 后启动扫码 | `npm run connect:qq-bind` 扫码 |
+| 大脑 | DSH profile 里的 agent（可配人设/技能） | 大肥鱼 brain（3110）+ 共享记忆库 |
+| 语音条 | 取决于插件与模型配置 | ✅ 已实现（MiniMax→silk→msg_type 7） |
+| `/通话` 对讲 | 需自己配 | ✅ 已实现 |
+| 微信通道复用 | ❌ 另起一套 | ✅ 同一个服务、同一份语音配置 |
+
 ## 实现与数据
 
 - `connect/qq/api.mjs`：QQ 开放平台 REST（`bots.qq.com/app/getAppAccessToken` 换 token，`api.sgroup.qq.com` 发消息/传文件）。
@@ -94,6 +122,6 @@ npm run connect:qq peers                # 当前名单
 
 ## 未做 / 下一步
 
-- 真实机器人联调：沙箱里跑通单聊、群聊 @、语音条往返。
+- 真实机器人联调：扫码绑定后跑通单聊、群聊 @、语音条往返（代码已就绪，等真实机器人）。
 - 实时连麦（阶段三）：QQ 官方不给 RTC，需要自建 TRTC/WebRTC 房间 + 信令 + H5 页面，复用现有 ASR/TTS。
 - 图片/文件消息、主动消息（需申请权限）、频道场景。
