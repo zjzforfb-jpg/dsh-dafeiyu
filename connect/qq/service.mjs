@@ -4,7 +4,7 @@ import { publishDesktopActivity } from '../../desktop/activity.mjs';
 import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
-import { captureExchange } from '../memory-hub.mjs';
+import { captureExchange, todayDigest } from '../memory-hub.mjs';
 import { ensureBinaries } from '../macui/index.mjs';
 import { hangup as hangupQqCall } from '../macui/qq.mjs';
 import { join } from 'node:path';
@@ -120,7 +120,7 @@ export class QqService {
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
 
     // 「挂了/挂断」这类指令直接落到 QQ 通话窗口，不经过模型。
-    if (inputKind === 'text' && /^(挂断|挂电话|挂了|结束通话|hang\s*up)[。.!！]?$/iu.test(String(text).trim())) {
+    if (/(挂断|挂电话|挂了|结束通话|hang\s*up)/iu.test(String(text).trim())) {
       const done = await this.hangupCall();
       const reply = done ? '好，挂了。' : '现在没找到正在进行的 QQ 通话窗口。';
       updateMessage(this.db, messageKey, { status: 'ready', reply });
@@ -219,7 +219,7 @@ export class QqService {
     let reply;
     try {
       const history = kind === 'group' ? groupContext(this.db, id, messageKey) : conversationHistory(this.db, kind, id);
-      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history, inputKind, speaker, atMe, mentionOthers, voiceCapabilities: this.voice?.status?.(), memories: this.memory ? memoryNotes(this.memory, spoken, 8) : [] });
+      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history, inputKind, speaker, atMe, mentionOthers, voiceCapabilities: this.voice?.status?.(), today: this.memory ? todayDigest(this.memory) : '', memories: this.memory ? memoryNotes(this.memory, spoken, 8) : [] });
       if (typeof reply !== 'string' || !reply.trim()) throw new Error('empty_reply');
       reply = reply.trim().slice(0, 1200);
     } catch (error) {
