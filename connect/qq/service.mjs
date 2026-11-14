@@ -4,7 +4,7 @@ import { publishDesktopActivity } from '../../desktop/activity.mjs';
 import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
-import { conversationHistory, dayKey, initQq, logInbound, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
+import { conversationHistory, dayKey, groupTranscript, initQq, logInbound, memberLabel, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
 
 const MAX_DOWNLOAD = 10 * 1024 * 1024;
 const DAILY_MODEL_CALLS = 50;
@@ -12,6 +12,18 @@ const DAILY_VOICE_REQUESTS = 50;
 
 const CALL_HELP = '通话已开始，直接发语音或文字都行；静默 60 秒会自动挂断，发 /挂断 可手动结束。';
 const HANGUP_HELP = '通话已挂断。';
+
+/** 群聊上下文：每个群友的消息带称呼，大肥鱼的回复作为 assistant 轮次。 */
+export function groupContext(db, convId, excludeId, limit = 14) {
+  const entries = groupTranscript(db, convId, limit, excludeId);
+  const out = [];
+  for (const entry of entries) {
+    const who = entry.author ? memberLabel(db, 'group', convId, entry.author) : '群友';
+    out.push({ role: 'user', content: `${who}：${String(entry.text).slice(0, 500)}` });
+    if (entry.reply) out.push({ role: 'assistant', content: String(entry.reply).slice(0, 500) });
+  }
+  return out;
+}
 
 export class QqService {
   constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch, groupReplyRate = 0.08, groupCooldownMs = 90000, groupNameCooldownMs = 25000, random = Math.random }) {
@@ -81,18 +93,23 @@ export class QqService {
   }
 
   async handle(event) {
-    const { kind, id, messageId, text = '', attachments = [], atMe = kind !== 'group' } = event;
+    const { kind, id, messageId, text = '', attachments = [], atMe = kind !== 'group', memberId = null, mentionOthers = false, mentionAll = false } = event;
     const messageKey = createHash('sha256').update(String(messageId ?? '')).digest('hex');
     const voiceAttachment = attachments.find(isVoiceAttachment) ?? null;
     const inputKind = voiceAttachment ? 'voice' : 'text';
-    if (!logInbound(this.db, { id: messageKey, kind, convId: id, msgId: messageId ?? null, inputKind, text, createdMs: this.now() })) return { duplicate: true };
+    if (!logInbound(this.db, { id: messageKey, kind, convId: id, msgId: messageId ?? null, inputKind, text, createdMs: this.now(), author: memberId })) return { duplicate: true };
 
     const allowed = peer(this.db, kind, id);
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
 
-    if (kind === 'group' && !atMe && !this.shouldJoinAmbient(kind, id, text)) {
-      updateMessage(this.db, messageKey, { status: 'ignored', error: 'ambient_skip' });
-      return { ignored: 'ambient_skip' };
+    if (kind === 'group' && !atMe) {
+      // 别人被 @ 的消息不抢答；@全体 只有在提到大肥鱼时才接
+      if (mentionOthers) { updateMessage(this.db, messageKey, { status: 'ignored', error: 'addressed_to_others' }); return { ignored: 'addressed_to_others' }; }
+      if (mentionAll && !/大肥鱼|肥鱼|鱼鱼/u.test(text)) { updateMessage(this.db, messageKey, { status: 'ignored', error: 'mention_all_skip' }); return { ignored: 'mention_all_skip' }; }
+      if (!this.shouldJoinAmbient(kind, id, text)) {
+        updateMessage(this.db, messageKey, { status: 'ignored', error: 'ambient_skip' });
+        return { ignored: 'ambient_skip' };
+      }
     }
 
     const command = text.trim();
@@ -162,8 +179,9 @@ export class QqService {
     }
     if (!spoken || !spoken.trim()) { updateMessage(this.db, messageKey, { status: 'held', error: 'empty_message' }); return { held: true }; }
 
+    const speaker = kind === 'group' ? memberLabel(this.db, kind, id, memberId, this.now()) : (allowed.label || '爸爸');
     const label = allowed.label || (kind === 'group' ? '群里' : '爸爸');
-    this.publish(`qq:${messageKey}:in`, { phase: 'start', message: `${label}：${spoken.trim().slice(0, 40)}` });
+    this.publish(`qq:${messageKey}:in`, { phase: 'start', message: `${kind === 'group' ? speaker : label}：${spoken.trim().slice(0, 40)}` });
 
     const day = dayKey(this.now());
     if (!reserve(this.db, day, 'model_calls', DAILY_MODEL_CALLS)) {
@@ -174,7 +192,8 @@ export class QqService {
     updateMessage(this.db, messageKey, { status: 'drafting' });
     let reply;
     try {
-      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history: conversationHistory(this.db, kind, id), inputKind, voiceCapabilities: this.voice?.status?.(), memories: this.memory ? memoryNotes(this.memory, spoken, 8) : [] });
+      const history = kind === 'group' ? groupContext(this.db, id, messageKey) : conversationHistory(this.db, kind, id);
+      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history, inputKind, speaker, atMe, mentionOthers, voiceCapabilities: this.voice?.status?.(), memories: this.memory ? memoryNotes(this.memory, spoken, 8) : [] });
       if (typeof reply !== 'string' || !reply.trim()) throw new Error('empty_reply');
       reply = reply.trim().slice(0, 1200);
     } catch (error) {

@@ -11,11 +11,19 @@ function normalize(dispatch) {
   }
   if (dispatch.t === 'GROUP_AT_MESSAGE_CREATE' || dispatch.t === 'GROUP_MESSAGE_CREATE') {
     const mentions = Array.isArray(d.mentions) ? d.mentions : [];
+    const raw = String(d.content ?? '');
+    // @全体 不算「对你说」，除非内容里点名大肥鱼（由 service 判断）
+    const mentionAll = /<@all>/iu.test(raw);
+    const atMe = dispatch.t === 'GROUP_AT_MESSAGE_CREATE' || (!mentionAll && mentions.some(entry => entry && entry.bot === true));
+    const others = mentions.filter(entry => entry && entry.bot !== true);
     return {
       kind: 'group', id: d.group_openid, memberId: d.author?.member_openid, messageId: d.id,
       text: cleanText(d.content), attachments: Array.isArray(d.attachments) ? d.attachments : [],
       timestamp: d.timestamp ?? null,
-      atMe: dispatch.t === 'GROUP_AT_MESSAGE_CREATE' || mentions.some(entry => entry && entry.bot === true),
+      atMe,
+      // 这条消息 @ 的是别人，不是冲着大肥鱼来的
+      mentionOthers: !atMe && !mentionAll && others.length > 0,
+      mentionAll,
     };
   }
   return null;

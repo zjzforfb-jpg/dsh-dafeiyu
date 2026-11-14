@@ -228,7 +228,8 @@ test('QQ group messages normalize mentions and only answer a fraction of ambient
   assert.equal(full.atMe, false);
   assert.equal(full.text, '今天好热 你们吃了吗');
   const atAll = normalizeDispatch({ t: 'GROUP_MESSAGE_CREATE', d: { id: 'm-2', group_openid: 'group-openid-1', content: '<@all> 集合', mentions: [{ id: 'bot', bot: true }] } });
-  assert.equal(atAll.atMe, true);
+  assert.equal(atAll.atMe, false);
+  assert.equal(atAll.mentionAll, true);
   const at = normalizeDispatch({ t: 'GROUP_AT_MESSAGE_CREATE', d: { id: 'm-3', group_openid: 'group-openid-1', content: '在吗' } });
   assert.equal(at.atMe, true);
 
@@ -249,4 +250,27 @@ test('QQ group messages normalize mentions and only answer a fraction of ambient
   assert.equal((await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'g-2', text: '有人吗', attachments: [], atMe: false })).ignored, 'ambient_skip');
   assert.equal((await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'g-3', text: '大肥鱼在吗', attachments: [], atMe: true })).replied, 'text');
   assert.equal(sent.length, 2);
+});
+
+test('QQ group replies carry speaker labels and skip messages aimed at other members', async () => {
+  const db = setup();
+  savePeer(db, { kind: 'group', id: 'group-openid-1', label: '家人群', enabled: true, autoReply: true, voiceReply: false });
+  const seen = [];
+  const service = new QqService({
+    db, now: () => TS, random: () => 0, groupReplyRate: 1, groupCooldownMs: 0,
+    voice: fakeVoice(),
+    ask: async payload => { seen.push(payload); return `回复${seen.length}`; },
+    api: { sendText: async () => ({}), sendVoice: async () => ({}) },
+    gateway: { start: async () => {}, close: async () => {} },
+  });
+  const first = await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'm-1', text: '今天吃什么', memberId: 'member-a', atMe: false });
+  assert.equal(first.replied, 'text');
+  const aimed = await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'm-2', text: '在吗', memberId: 'member-b', atMe: false, mentionOthers: true });
+  assert.equal(aimed.ignored, 'addressed_to_others');
+  const third = await service.handle({ kind: 'group', id: 'group-openid-1', messageId: 'm-3', text: '大肥鱼你说呢', memberId: 'member-b', atMe: true });
+  assert.equal(third.replied, 'text');
+  const last = seen.at(-1);
+  assert.equal(last.speaker, '群友2');
+  assert.ok(last.history.some(item => item.role === 'user' && String(item.content).startsWith('群友1：')), 'group history should label speakers');
+  assert.ok(last.history.some(item => item.role === 'assistant'), 'group history should include own replies');
 });

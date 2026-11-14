@@ -9,7 +9,12 @@ export function initQq(db) {
       error TEXT, delivery_kind TEXT, audio_duration_ms INTEGER, created_ms INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS qq_usage(
       day TEXT PRIMARY KEY, model_calls INTEGER NOT NULL DEFAULT 0, voice_requests INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS qq_members(
+      conv_kind TEXT NOT NULL, conv_id TEXT NOT NULL, member_id TEXT NOT NULL, label TEXT NOT NULL,
+      seen_ms INTEGER NOT NULL, PRIMARY KEY(conv_kind, conv_id, member_id));
     UPDATE qq_messages SET status='unknown', error='restart_interrupted' WHERE status IN ('transcribing','synthesizing','sending');`);
+  const columns = db.prepare('PRAGMA table_info(qq_messages)').all();
+  if (!columns.some(column => column.name === 'author')) db.exec('ALTER TABLE qq_messages ADD COLUMN author TEXT');
 }
 
 function validKind(kind) {
@@ -33,10 +38,27 @@ export function peers(db) {
   return db.prepare('SELECT conv_kind AS kind, conv_id AS id, label, enabled, auto_reply AS autoReply, voice_reply AS voiceReply FROM qq_peers ORDER BY kind, id').all();
 }
 
-export function logInbound(db, { id, kind, convId, msgId, inputKind, text, createdMs }) {
-  const result = db.prepare(`INSERT OR IGNORE INTO qq_messages(id, conv_kind, conv_id, msg_id, input_kind, text, status, created_ms)
-    VALUES(?,?,?,?,?,?,'pending',?)`).run(id, kind, convId, msgId ?? null, inputKind, text ?? null, createdMs);
+export function logInbound(db, { id, kind, convId, msgId, inputKind, text, createdMs, author = null }) {
+  const result = db.prepare(`INSERT OR IGNORE INTO qq_messages(id, conv_kind, conv_id, msg_id, input_kind, text, status, created_ms, author)
+    VALUES(?,?,?,?,?,?,'pending',?,?)`).run(id, kind, convId, msgId ?? null, inputKind, text ?? null, createdMs, typeof author === 'string' ? author.slice(0, 64) : null);
   return result.changes > 0;
+}
+
+/** 群成员的稳定称呼：第一次见到时分配「群友1」「群友2」…，之后固定。 */
+export function memberLabel(db, kind, convId, memberId, now = Date.now()) {
+  if (typeof memberId !== 'string' || !memberId) return '群友';
+  const row = db.prepare('SELECT label FROM qq_members WHERE conv_kind=? AND conv_id=? AND member_id=?').get(kind, convId, memberId);
+  if (row) { db.prepare('UPDATE qq_members SET seen_ms=? WHERE conv_kind=? AND conv_id=? AND member_id=?').run(now, kind, convId, memberId); return row.label; }
+  const count = db.prepare('SELECT COUNT(*) AS n FROM qq_members WHERE conv_kind=? AND conv_id=?').get(kind, convId).n;
+  const label = `群友${count + 1}`;
+  db.prepare('INSERT INTO qq_members(conv_kind, conv_id, member_id, label, seen_ms) VALUES(?,?,?,?,?)').run(kind, convId, memberId, label, now);
+  return label;
+}
+
+/** 群聊上下文：包含尚未回复的消息和自己的回复，按时间正序，带发言人。 */
+export function groupTranscript(db, convId, limit = 16, excludeId = null) {
+  const rows = db.prepare(`SELECT text, reply, author, created_ms FROM qq_messages WHERE conv_kind='group' AND conv_id=? AND text IS NOT NULL AND id != ? ORDER BY created_ms DESC LIMIT ?`).all(convId, excludeId ?? '', limit);
+  return rows.reverse().map(row => ({ text: row.text ?? '', reply: row.reply ?? null, author: row.author ?? null, time: row.created_ms }));
 }
 
 export function updateMessage(db, id, fields) {
