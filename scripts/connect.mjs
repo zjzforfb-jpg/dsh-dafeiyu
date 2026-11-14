@@ -12,7 +12,7 @@ const command = process.argv[2] ?? 'status';
 if (command === 'start') {
   process.umask(0o077);
   const home = resolve(root, '../dsh-home');
-  const service = await startConnect({ root, voiceRoot:resolve(root,'../voice'), askIlink: connectBrain(home), askQq: qqBrain(home), askCall: callBrain(home), onEvent: event => announceConnectEvent(home, event) });
+  const service = await startConnect({ root, voiceRoot:resolve(root,'../voice'), home, askIlink: connectBrain(home), askQq: qqBrain(home), askCall: callBrain(home), onEvent: event => announceConnectEvent(home, event) });
   const stopTunnel = maintainUsbTunnel(root);
   console.log(`DaFeiYu Connect listening on 127.0.0.1:${service.port}`);
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { stopTunnel(); await service.close(); process.exit(0); });

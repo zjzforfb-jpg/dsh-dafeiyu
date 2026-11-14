@@ -10,6 +10,8 @@ import { loadQqConfig, QqApi } from '../connect/qq/api.mjs';
 import { initQq, logInbound, savePeer, peer, conversationHistory, reserve, usage, dayKey } from '../connect/qq/store.mjs';
 import { CallSessions } from '../connect/qq/call.mjs';
 import { QqService } from '../connect/qq/service.mjs';
+import { openMemory } from '../brain/memory.mjs';
+import { listMemories } from '../connect/qq/memory.mjs';
 
 const KIND = 'c2c', CONV = 'user-openid-0001', TS = Date.UTC(2026, 10, 14, 1, 0);
 const response = data => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -181,4 +183,41 @@ test('QQ service stops answering when the daily model budget is exhausted', asyn
   assert.equal(qq.row(key('b-1')).status, 'held');
   assert.equal(texts.length, 1);
   db.close();
+});
+
+test('QQ chat writes long-term memory, recalls it into the brain, and logs desktop activity', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dafeiyu-qq-memory-'));
+  const memory = openMemory(join(dir, 'dafeiyu-memory.sqlite'));
+  try {
+    const db = setup();
+    savePeer(db, { kind: KIND, id: CONV, label: '爸爸', enabled: true, autoReply: true, voiceReply: false });
+    const sent = [];
+    const contexts = [];
+    const serviceWith = ask => new QqService({
+      db, memory, home: dir, now: () => TS,
+      voice: fakeVoice(),
+      ask: async context => { contexts.push(context); return ask(context); },
+      api: { sendText: async message => { sent.push(message); return {}; }, sendVoice: async () => ({}) },
+      gateway: { start: async () => {}, close: async () => {} },
+    });
+
+    await serviceWith(async () => '好呀。').handle({ kind: KIND, id: CONV, messageId: 'mem-1', text: '/记住 生日是2026年10月17日', attachments: [] });
+    const rows = listMemories(memory, 5);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].content, /生日是2026年10月17日/u);
+
+    await serviceWith(async () => '好呀。').handle({ kind: KIND, id: CONV, messageId: 'mem-2', text: '/记忆', attachments: [] });
+    assert.match(sent.at(-1).content, /#\d+/u);
+
+    await serviceWith(async () => '喵。').handle({ kind: KIND, id: CONV, messageId: 'mem-3', text: '记住我属猫', attachments: [] });
+    assert.equal(listMemories(memory, 10).length, 2);
+    assert.ok(Array.isArray(contexts.at(-1).memories));
+
+    const events = memory.prepare('SELECT source, phase, message FROM desktop_activity_events').all();
+    assert.ok(events.some(event => event.phase === 'start' && event.message.startsWith('爸爸：')));
+    assert.ok(events.some(event => event.phase === 'done' && event.message.startsWith('大肥鱼：')));
+  } finally {
+    memory.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

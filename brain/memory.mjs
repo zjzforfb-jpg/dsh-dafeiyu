@@ -16,8 +16,8 @@ export function openMemory(path) {
 export function memoryRecordFromUser(text) {
   const cleaned = text.trim();
   const experience = cleaned.match(/^(?:请)?(?:记住)?(?:这是)?我们的回忆[：:,，\s]*(.+)$/u);
-  const preference = cleaned.match(/^(?:请)?(?:你要)?记住[：:,，\s]*(?:你)?(?:最)?喜欢(?:的)?[：:,，\s]*(.+)$/u);
-  const fact = cleaned.match(/^(?:爸爸(?:想让你)?|我(?:想让你)?)?\s*(?:请)?记住[：:,，\s]*(.+)$/u);
+  const preference = cleaned.match(/^(?:请)?(?:你要)?(?:记住|記住|记下|記下)[：:,，\s]*(?:你)?(?:最)?喜欢(?:的)?[：:,，\s]*(.+)$/u);
+  const fact = cleaned.match(/^(?:爸爸(?:想让你)?|我(?:想让你)?)?\s*(?:请)?(?:记住|記住|记下|記下)[：:,，\s]*(.+)$/u);
   const rawContent = (experience?.[1] ?? preference?.[1] ?? fact?.[1])?.trim();
   const content = preference && rawContent ? `大肥鱼喜欢${rawContent}` : rawContent;
   if (!content || content.length > 500) return null;

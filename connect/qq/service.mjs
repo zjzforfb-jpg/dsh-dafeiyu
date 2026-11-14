@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import { forgetMemory, reviseMemory } from '../../brain/memory.mjs';
+import { publishDesktopActivity } from '../../desktop/activity.mjs';
 import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
+import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
 import { conversationHistory, dayKey, initQq, logInbound, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
 
 const MAX_DOWNLOAD = 10 * 1024 * 1024;
@@ -11,9 +14,9 @@ const CALL_HELP = '通话已开始，直接发语音或文字都行；静默 60 
 const HANGUP_HELP = '通话已挂断。';
 
 export class QqService {
-  constructor({ db, voice, api, ask, WebSocketImpl, gateway, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch }) {
+  constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch }) {
     initQq(db);
-    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl });
+    Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort });
     this.calls = new CallSessions({ timeoutMs: callTimeoutMs, now });
     this.gateway = gateway ?? new QqGateway({ api, WebSocketImpl, onEvent: event => this.handle(event), onStatus: status => log({ qq: status }) });
     this.stopped = false;
@@ -34,6 +37,14 @@ export class QqService {
 
   status() {
     return { peers: peers(this.db), calls: this.calls.list(), usage: usage(this.db, dayKey(this.now())) };
+  }
+
+  publish(eventKey, { phase, message, activity = 'chat' }) {
+    if (!this.memory || !this.home) return;
+    void publishDesktopActivity({
+      db: this.memory, home: this.home, port: this.petPort, eventKey,
+      event: { source: 'conversation', activity, phase, message },
+    }).catch(() => {});
   }
 
   async download(url) {
@@ -79,6 +90,36 @@ export class QqService {
       updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
       return { command: 'call_end', ended };
     }
+    if (this.memory && /^\/记忆$/.test(command)) {
+      await this.sendTextSafe(kind, id, formatMemoryList(listMemories(this.memory, 10)), messageId);
+      updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
+      return { command: 'memory_list' };
+    }
+    const remembered = command.match(/^\/记住[：:，,\s]+(.+)$/u);
+    if (this.memory && remembered) {
+      const row = rememberText(this.memory, remembered[1]);
+      await this.sendTextSafe(kind, id, row ? `记住了 #${row.id}：${row.content}` : '这句不方便记（涉及隐私内容），我跳过啦。', messageId);
+      updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
+      return { command: 'memory_save', id: row?.id ?? null };
+    }
+    const corrected = command.match(/^\/更正记忆\s*#?(\d+)[：:，,\s]+(.+)$/u);
+    if (this.memory && corrected) {
+      try {
+        const result = reviseMemory(this.memory, Number(corrected[1]), corrected[2]);
+        await this.sendTextSafe(kind, id, result.changed ? `已改成：${corrected[2].trim()}` : '内容和原来一样，没有改动。', messageId);
+      } catch (error) {
+        await this.sendTextSafe(kind, id, `没改成：${error.message}`, messageId);
+      }
+      updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
+      return { command: 'memory_revise' };
+    }
+    const forgotten = command.match(/^\/忘记记忆\s*#?(\d+)$/u);
+    if (this.memory && forgotten) {
+      const result = forgetMemory(this.memory, Number(forgotten[1]));
+      await this.sendTextSafe(kind, id, result ? `已经忘掉 #${forgotten[1]} 了。` : `没有找到 #${forgotten[1]}。`, messageId);
+      updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
+      return { command: 'memory_forget' };
+    }
     if (/^\/语音\s*(开|关)$/.test(command)) {
       const enabled = command.endsWith('开');
       savePeer(this.db, { kind, id, enabled: true, autoReply: true, voiceReply: enabled });
@@ -103,6 +144,9 @@ export class QqService {
     }
     if (!spoken || !spoken.trim()) { updateMessage(this.db, messageKey, { status: 'held', error: 'empty_message' }); return { held: true }; }
 
+    const label = allowed.label || (kind === 'group' ? '群里' : '爸爸');
+    this.publish(`qq:${messageKey}:in`, { phase: 'start', message: `${label}：${spoken.trim().slice(0, 40)}` });
+
     const day = dayKey(this.now());
     if (!reserve(this.db, day, 'model_calls', DAILY_MODEL_CALLS)) {
       updateMessage(this.db, messageKey, { status: 'held', error: 'daily_model_budget' });
@@ -112,7 +156,7 @@ export class QqService {
     updateMessage(this.db, messageKey, { status: 'drafting' });
     let reply;
     try {
-      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history: conversationHistory(this.db, kind, id), inputKind, voiceCapabilities: this.voice?.status?.() });
+      reply = await this.ask({ kind, id, peer: allowed, text: spoken, history: conversationHistory(this.db, kind, id), inputKind, voiceCapabilities: this.voice?.status?.(), memories: this.memory ? memoryNotes(this.memory, spoken, 8) : [] });
       if (typeof reply !== 'string' || !reply.trim()) throw new Error('empty_reply');
       reply = reply.trim().slice(0, 1200);
     } catch (error) {
@@ -120,6 +164,8 @@ export class QqService {
       return { error: 'model_failed' };
     }
     updateMessage(this.db, messageKey, { status: 'ready', reply });
+    if (this.memory) { try { rememberExchange(this.memory, spoken, reply); } catch {} }
+    this.publish(`qq:${messageKey}:out`, { phase: 'done', message: `大肥鱼：${reply.slice(0, 40)}` });
 
     const inCall = Boolean(this.calls.active(kind, id));
     const wantVoice = Boolean(this.voice) && (inCall || (inputKind === 'voice' && allowed.voiceReply));

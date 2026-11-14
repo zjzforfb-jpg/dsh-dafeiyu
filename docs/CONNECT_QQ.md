@@ -74,6 +74,14 @@ npm run connect:qq block c2c <openid>   # 完全忽略
 npm run connect:qq peers                # 当前名单
 ```
 
+## 长期记忆
+
+QQ 通道与桌面/微信共用 `runtime/dsh-home/dafeiyu-memory.sqlite`（WAL，多进程可同时打开）：
+
+- **自动记**：消息里出现「记住/记下/記住/記下 …」会自动落库（`source='qq_chat'`），语音转写后同样生效。
+- **会想起**：每轮对话从记忆库做相关性检索，把最多 8 条注入系统提示（带 `#编号`）。
+- **能改**：`/更正记忆 #编号 新内容`、`/忘记记忆 #编号`。
+
 ## 聊天内的命令
 
 - `/通话` 或 `/打电话`：开启对讲模式，之后每条回复都发语音条；静默 60s 自动挂断（会发一句文字提示）。
@@ -118,7 +126,17 @@ QQ 开放平台的 Agent 接入页面（https://bot.q.qq.com/wiki/agent-qqbot/ �
 | `voice_reply_failed:*` | TTS/编码失败，已自动回退文字；看 `qq_messages.error` |
 | `qq_gateway_invalid` | `/gateway` 返回异常，通常是机器人未上线或 IP 白名单 |
 | 收到消息但 `held` | 会话不在名单里，按上文 `allow` |
+| 说「记住…」却查不到 | 检查句子是否以「记住/记下」开头；`/记忆` 可列出编号 |
 | `daily_model_budget` | 当天预算用完，次日恢复（Asia/Shanghai 00:00） |
+
+## 桌面实时显示
+
+QQ 消息进出时，Connect 会把「谁说了什么」作为桌面活动事件推给桌宠（`desktop_activity_events`，source=`conversation`）：
+
+- 收到消息：气泡「爸爸：前半句…」+ `chat` 动画；
+- 发出回复：气泡「大肥鱼：前半句…」+ `chat` 动画。
+
+气泡最多 120 字（默认展示 6.5 秒），完整记录仍在 `qq_messages`。桌宠没开时事件只入库、不报错。
 
 ## 未做 / 下一步
 
