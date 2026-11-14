@@ -62,6 +62,7 @@ export function parseComments(nodes) {
     const node = nodes[index];
     if (!node.cls.includes('Text')) continue;
     if (!node.text || META.test(node.text) || node.text.length < 4) continue;
+    if (/^(去发布作品|发作品交流|让更多人看到|同时发布为作品)/u.test(node.text)) continue;
     const reply = nodes.slice(index + 1, index + 14).find((next) => next.text === '回复' && next.clickable);
     if (!reply) continue;
     const author = [...nodes.slice(0, index)].reverse().find((prev) => prev.cls.includes('Text') && prev.text && !META.test(prev.text) && looksLikeName(prev.text));
@@ -76,23 +77,28 @@ export function parseComments(nodes) {
 
 /** Post a top-level comment on the current video. */
 export async function postComment(serial, text, { dryRun = false } = {}) {
-  await tapPoint(serial, DOUYIN.commentInput);
-  await sleepMs(1200);
   let nodes = await dumpUi(serial);
-  const input = nodes.find((node) => node.focused && node.cls.includes('EditText'));
-  if (!input) throw new Error('comment_input_missing');
-  await withAdbKeyboard(serial, async () => inputText(serial, text));
-  await sleepMs(700);
-  nodes = await dumpUi(serial);
-  const typed = nodes.some((node) => node.text.includes(text.slice(0, 8)));
-  if (!typed) throw new Error('comment_text_missing');
-  let send = findNodes(nodes, { text: '发送' }).pop();
-  if (!send) {
-    await tapPoint(serial, DOUYIN.composerInput);
-    await sleepMs(900);
-    const expanded = await dumpUi(serial);
-    send = findNodes(expanded, { text: '发送' }).pop();
+  let input = nodes.find((node) => node.cls.includes('EditText'));
+
+  if (input) {
+    // 点开编辑器（内联输入条 → 全屏编辑页）
+    await tapPoint(serial, { x: input.bounds.cx, y: input.bounds.cy });
+    await sleepMs(1400);
+    nodes = await dumpUi(serial);
+    input = nodes.find((node) => node.focused && node.cls.includes('EditText')) ?? nodes.find((node) => node.cls.includes('EditText'));
+    if (input) {
+      await tapPoint(serial, { x: input.bounds.cx, y: input.bounds.cy });
+      await sleepMs(700);
+    }
+  } else if (!findNodes(nodes, { text: '发送' }).length) {
+    throw new Error('comment_bar_missing');
   }
+
+  await withAdbKeyboard(serial, async () => inputText(serial, text));
+  await sleepMs(900);
+
+  nodes = await dumpUi(serial);
+  const send = findNodes(nodes, { text: '发送' }).pop();
   if (!send) throw new Error('comment_send_missing');
   if (dryRun) {
     await adbShell(serial, 'input keyevent 4');
@@ -100,9 +106,12 @@ export async function postComment(serial, text, { dryRun = false } = {}) {
     return { dryRun: true, text, sendPoint: { x: send.bounds.cx, y: send.bounds.cy } };
   }
   await tapPoint(serial, { x: send.bounds.cx, y: send.bounds.cy });
-  await sleepMs(1600);
-  const after = await dumpUi(serial);
-  return { sent: after.some((node) => node.text.includes(text.slice(0, 8))) };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await sleepMs(1200);
+    const after = await dumpUi(serial);
+    if (after.some((node) => node.text.includes(text.slice(0, 6)))) return { sent: true };
+  }
+  return { sent: false };
 }
 
 /** Reply to the first comment whose text matches `match`. */
