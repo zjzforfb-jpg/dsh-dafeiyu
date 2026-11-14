@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { deviceSerial } from '../device/wechat.mjs';
+import { likeBackComments } from '../device/douyin.mjs';
 import {
   openCommentsSmart, parseComments, postComment, replyToComment, resetDouyin,
   openSearch, searchKeyword, parseResults, currentActivity,
@@ -55,6 +56,7 @@ function gate(text) {
     recentTexts: history.map((item) => item.text),
     lastCommentAt: history.at(-1)?.at ?? 0,
     todayCount: history.filter((item) => dayKey(item.at) === today).length,
+    hourCount: history.filter((item) => now - item.at < 3600_000).length,
     now,
   });
   return { decision, state, history };
@@ -178,6 +180,12 @@ async function main() {
     const works = parseProfileWorks(profile);
     console.log(`「${name}」主页最近作品 ${works.length} 条：`);
     works.slice(0, 12).forEach((work, index) => console.log(`${index + 1}. ${work.text}`));
+    return;
+  }
+
+  if (has('like-back')) {
+    const result = await likeBackComments(serial, { max: Number(option('max', '12')) });
+    console.log(JSON.stringify(result));
     return;
   }
 

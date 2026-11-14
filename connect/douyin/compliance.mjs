@@ -5,7 +5,8 @@
 
 export const LIMITS = {
   maxLength: 80,          // 单条评论字数上限（可爱短句为主）
-  dailyComments: 10,      // 每账号每天评论上限
+  dailyComments: 30,      // 每账号每天评论上限（爸爸定的 30 条/天）
+  hourlyComments: 5,      // 每小时最多 5 条
   minIntervalMs: 90_000,  // 两条评论最小间隔
   duplicateWindowMs: 24 * 60 * 60 * 1000,
 };
@@ -31,7 +32,7 @@ const DRAFT_RULES = [
 
 const PRICE = /(\d+(\.\d+)?\s*(元|块|万|千|百))|多少钱|价格|便宜点|优惠券/u;
 
-export function checkComment(text, { recentTexts = [], lastCommentAt = 0, todayCount = 0, now = Date.now() } = {}) {
+export function checkComment(text, { recentTexts = [], lastCommentAt = 0, todayCount = 0, hourCount = 0, now = Date.now() } = {}) {
   const body = String(text ?? '').trim();
   if (!body) return { ok: false, level: 'block', id: 'empty', reason: '评论内容为空' };
   if (body.length > LIMITS.maxLength) return { ok: false, level: 'draft', id: 'too_long', reason: `超过 ${LIMITS.maxLength} 字，先给人看` };

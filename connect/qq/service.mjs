@@ -6,6 +6,7 @@ import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
 import { captureExchange, todayDigest } from '../memory-hub.mjs';
 import { actionMarkerNames, stripActionMarkers, runAction, ACTIONS } from '../actions.mjs';
+import { addPlan, runPlan } from '../plans.mjs';
 import { ensureBinaries } from '../macui/index.mjs';
 import { hangup as hangupQqCall } from '../macui/qq.mjs';
 import { join } from 'node:path';
@@ -252,12 +253,24 @@ export class QqService {
       await this.api.sendText({ kind, id, content: reply, msgId: messageId });
       updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
       if (inCall) this.calls.touch(kind, id);
-      for (const name of actions) this.#runActionLater(name, kind, id);
+      if (actions.length > 1) this.#runPlanLater(actions, kind, id);
+      else for (const name of actions) this.#runActionLater(name, kind, id);
       return { replied: 'text', actions };
     } catch (error) {
       updateMessage(this.db, messageKey, { status: 'unknown', error: 'delivery_not_confirmed' });
       return { error: 'delivery_not_confirmed' };
     }
+  }
+
+  #runPlanLater(names, kind, convId) {
+    Promise.resolve().then(async () => {
+      const plan = addPlan(this.root, { steps: names.map((name) => ({ name })), origin: 'qq' });
+      const order = names.map((name, index) => `${index + 1}) ${ACTIONS[name]?.label ?? name}`).join('，');
+      try { await this.api.sendText({ kind, id: convId, content: `好，我按顺序来：${order}。做完一件跟你说一件。` }); } catch {}
+      const result = await runPlan(this.root, plan, { log: (line) => this.log?.({ plan: line }) });
+      const text = result.ok ? `计划里的 ${result.steps} 件事都做完了。` : `计划里「${ACTIONS[result.failedStep]?.label ?? result.failedStep}」这一步没做成，我先跟爸爸说一声。`;
+      try { await this.api.sendText({ kind, id: convId, content: text }); } catch {}
+    });
   }
 
   #runActionLater(name, kind, convId) {

@@ -32,6 +32,22 @@ export const ACTIONS = {
       return summarize(stdout) || '评论任务已执行。';
     },
   },
+  'douyin.browse': {
+    label: '刷一会儿抖音',
+    async run({ root, args = {} }) {
+      const n = Math.min(Math.max(Number(args.count ?? 8), 3), 20);
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const run1 = promisify(execFile);
+      await run1('adb', ['shell', 'am', 'start', '-n', 'com.ss.android.ugc.aweme/.splash.SplashActivity'], { timeout: 30_000 });
+      await new Promise((r) => setTimeout(r, 3500));
+      for (let i = 0; i < n; i += 1) {
+        await run1('adb', ['shell', 'input', 'swipe', '656', '2100', '656', '800', '320'], { timeout: 20_000 });
+        await new Promise((r) => setTimeout(r, 2200));
+      }
+      return `刷了 ${n} 条视频。`;
+    },
+  },
   'qq.hangup': {
     label: '挂断 QQ 通话',
     async run({ root }) {

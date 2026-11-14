@@ -390,3 +390,36 @@ export async function sendInCurrentComposer(serial, text, { dryRun = false } = {
   const final = await dumpUi(serial);
   return { sent: final.some((node) => node.text.includes(text.slice(0, 6))) };
 }
+
+/** 给“我”的作品评论区点赞（回心）：打开自己的第一个作品 → 评论区 → 逐行点右侧的 ♡。 */
+export async function likeBackComments(serial, { max = 12, gapMs = 700 } = {}) {
+  await adbShell(serial, 'input tap 1173 2769'); // 我
+  await sleepMs(1800);
+  let nodes = await dumpUi(serial);
+  const tiles = worksTiles(nodes);
+  if (!tiles.length) return { liked: 0, error: 'no_works' };
+  await tapPoint(serial, { x: tiles[0].bounds.cx, y: tiles[0].bounds.y + Math.round(tiles[0].bounds.h * 0.38) });
+  await sleepMs(2200);
+  await openCommentsSmart(serial);
+  await sleepMs(1200);
+  nodes = await dumpUi(serial);
+  const panelOpen = nodes.some((n) => /评论\s*\d+|展开\d+条回复|作者回复过/u.test(n.text ?? ''));
+  if (!panelOpen) return { liked: 0, error: 'comment_panel_not_open' };
+  const comments = nodes
+    .filter((n) => n.cls.includes('TextView') && n.text && n.text.length >= 6 && n.bounds.w > 380 && n.bounds.h < 200)
+    .sort((a, b) => a.bounds.y - b.bounds.y);
+  let liked = 0;
+  const seen = new Set();
+  for (const row of comments) {
+    const key = `${row.bounds.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (row.bounds.y < 900) continue;
+    await tapPoint(serial, { x: 1246, y: row.bounds.cy });
+    liked += 1;
+    await sleepMs(gapMs);
+    if (liked >= max) break;
+  }
+  await adbShell(serial, 'input keyevent BACK');
+  return { liked };
+}
