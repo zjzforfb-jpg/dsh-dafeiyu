@@ -166,6 +166,38 @@ async function main() {
     return;
   }
 
+  if (has('work-comment')) {
+    const account = option('account');
+    if (!account) throw new Error('need_account');
+    const workText = option('work-text');
+    await resetDouyin(serial);
+    await openSearch(serial);
+    await searchKeyword(serial, account);
+    let profile = await openUserProfile(serial, account);
+    let works = parseProfileWorks(profile);
+    if (workText) works = works.filter((work) => work.text.includes(workText));
+    const work = works[0];
+    if (!work) throw new Error('work_not_found');
+    const { tapPoint, sleep } = await import('../device/uia.mjs');
+    await tapPoint(serial, work.point);
+    await sleep(3000);
+    const opened = await currentActivity(serial);
+    if (!/DetailActivity/u.test(opened)) throw new Error(`detail_not_opened:${opened}`);
+    const comments = await openCommentsSmart(serial);
+    let text = option('text');
+    if (!text) {
+      if (!has('generate')) throw new Error('need_text_or_generate');
+      text = await (douyinBrain(home))({ caption: work.text, keyword: account });
+    }
+    const { decision } = gate(text);
+    console.log(JSON.stringify({ account, work: work.text.slice(0, 40), drafted: text, level: decision.level, reason: decision.reason }, null, 2));
+    if (!decision.ok || has('dry-run')) return;
+    const result = await postComment(serial, text);
+    if (result.sent) remember(text, work.text);
+    console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
+    return;
+  }
+
   if (has('interactions')) {
     await resetDouyin(serial);
     const nodes = await readInteractions(serial);
