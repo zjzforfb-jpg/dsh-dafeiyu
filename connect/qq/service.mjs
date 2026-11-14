@@ -5,6 +5,7 @@ import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
 import { captureExchange, todayDigest } from '../memory-hub.mjs';
+import { actionMarkerNames, stripActionMarkers, runAction, ACTIONS } from '../actions.mjs';
 import { ensureBinaries } from '../macui/index.mjs';
 import { hangup as hangupQqCall } from '../macui/qq.mjs';
 import { join } from 'node:path';
@@ -221,6 +222,8 @@ export class QqService {
     }
     const wantsHangup = /\[HANGUP\]/i.test(reply);
     if (wantsHangup) reply = reply.replace(/\[HANGUP\]/giu, '').trim();
+    const actions = actionMarkerNames(reply);
+    if (actions.length) reply = stripActionMarkers(reply);
     updateMessage(this.db, messageKey, { status: 'ready', reply });
     if (this.memory) {
       try { rememberExchange(this.memory, spoken, reply); } catch {}
@@ -249,11 +252,22 @@ export class QqService {
       await this.api.sendText({ kind, id, content: reply, msgId: messageId });
       updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
       if (inCall) this.calls.touch(kind, id);
-      return { replied: 'text' };
+      for (const name of actions) this.#runActionLater(name, kind, id);
+      return { replied: 'text', actions };
     } catch (error) {
       updateMessage(this.db, messageKey, { status: 'unknown', error: 'delivery_not_confirmed' });
       return { error: 'delivery_not_confirmed' };
     }
+  }
+
+  #runActionLater(name, kind, convId) {
+    const label = ACTIONS[name]?.label ?? name;
+    Promise.resolve().then(async () => {
+      const result = await runAction(name, { root: this.root });
+      const text = result.ok ? `${label}：${result.text || '做完了'}` : `${label}失败：${result.error}`;
+      try { await this.api.sendText({ kind, id: convId, content: text }); } catch {}
+      this.log({ action: name, ok: result.ok });
+    });
   }
 
   sweep() {
