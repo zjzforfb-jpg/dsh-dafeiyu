@@ -55,7 +55,8 @@
     "connect:qq-answer": "node scripts/qq-answer.mjs",
     "douyin": "node scripts/douyin.mjs",
     "douyin:watch": "node scripts/douyin-watch.mjs",
-    "douyin:play": "node scripts/douyin-play.mjs"
+    "douyin:play": "node scripts/douyin-play.mjs",
+    "douyin:post": "node scripts/douyin-post.mjs"
   },
   "dependencies": {
     "@tencent-connect/qqbot-connector": "^1.2.0",
