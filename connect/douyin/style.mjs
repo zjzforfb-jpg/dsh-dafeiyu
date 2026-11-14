@@ -27,3 +27,16 @@ export const STYLE = [
 export function buildPrompt(pose, scene = '') {
   return `Character: ${CHARACTER}.\nArt direction: ${STYLE}.\nPose: ${pose}.${scene ? `\nScene: ${scene}.` : ''}`;
 }
+
+/** 固定封面模板提示词：大肥鱼占比大 + 爆款封面文字。 */
+export function coverPrompt(title, { mood = 'happy', ratio = '3:4' } = {}) {
+  return [
+    'Vertical social-media cover for a cute anime account, aspect ' + ratio + '.',
+    'The chibi character takes about 70% of the frame, big expressive face, playful ' + mood + ' expression, waving at the camera.',
+    `Character: ${CHARACTER}.`,
+    'Style: ' + STYLE + '.',
+    'Composition: warm living room background, soft depth of field, leave the top-left area slightly calmer for text.',
+    `Add big bold Chinese cover text: "${title}". Use a chunky rounded font, white fill with dark navy outline and a soft warm glow, placed in the upper third, very legible on a phone.`,
+    'No other text, no watermark.',
+  ].join('\n');
+}

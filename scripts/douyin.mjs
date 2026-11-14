@@ -15,9 +15,10 @@ import { deviceSerial } from '../device/wechat.mjs';
 import {
   openCommentsSmart, parseComments, postComment, replyToComment, resetDouyin,
   openSearch, searchKeyword, parseResults, currentActivity,
-  parseSearchCards, openUserProfile, parseProfileWorks, sendInCurrentComposer,
+  parseSearchCards, openUserProfile, parseProfileWorks, worksTiles, sendInCurrentComposer,
   readInteractions, parseInteractions, openInteraction,
 } from '../device/douyin.mjs';
+import { dumpUi } from '../device/uia.mjs';
 import { checkComment, describeRules, LIMITS } from '../connect/douyin/compliance.mjs';
 import { loadAccounts, saveAccounts, upsertAccounts } from '../connect/douyin/accounts.mjs';
 import { douyinBrain } from '../connect/douyin/brain.mjs';
@@ -173,27 +174,35 @@ async function main() {
     await resetDouyin(serial);
     await openSearch(serial);
     await searchKeyword(serial, account);
-    let profile = await openUserProfile(serial, account);
-    let works = parseProfileWorks(profile);
-    if (workText) works = works.filter((work) => work.text.includes(workText));
-    const work = works[0];
-    if (!work) throw new Error('work_not_found');
-    const { tapPoint, sleep } = await import('../device/uia.mjs');
-    await tapPoint(serial, work.point);
-    await sleep(3000);
-    const opened = await currentActivity(serial);
+    await openUserProfile(serial, account);
+    const nodes = await dumpUi(serial);
+    const tiles = worksTiles(nodes);
+    const works = parseProfileWorks(nodes);
+    const work = workText ? works.find((item) => item.text.includes(workText)) : works[0];
+    if (workText && !work) throw new Error('work_not_found');
+    if (!tiles.length) throw new Error('work_tile_missing');
+    const tile = (work && tiles.find((item) => work.point.x >= item.bounds.x && work.point.x <= item.bounds.x + item.bounds.w
+      && work.point.y >= item.bounds.y - 90 && work.point.y <= item.bounds.y + item.bounds.h + 90)) ?? tiles[0];
+    const { tapPoint: tap, sleep: nap } = await import('../device/uia.mjs');
+    let opened = '';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await tap(serial, attempt === 0 ? tile.point : { x: tile.bounds.cx, y: tile.bounds.y + 60 });
+      await nap(2600);
+      opened = await currentActivity(serial);
+      if (/DetailActivity/u.test(opened)) break;
+    }
     if (!/DetailActivity/u.test(opened)) throw new Error(`detail_not_opened:${opened}`);
-    const comments = await openCommentsSmart(serial);
+    await openCommentsSmart(serial);
     let text = option('text');
     if (!text) {
       if (!has('generate')) throw new Error('need_text_or_generate');
-      text = await (douyinBrain(home))({ caption: work.text, keyword: account });
+      text = await douyinBrain(home)({ caption: option('caption-hint', ''), keyword: account });
     }
     const { decision } = gate(text);
-    console.log(JSON.stringify({ account, work: work.text.slice(0, 40), drafted: text, level: decision.level, reason: decision.reason }, null, 2));
+    console.log(JSON.stringify({ account, drafted: text, level: decision.level, reason: decision.reason }, null, 2));
     if (!decision.ok || has('dry-run')) return;
     const result = await postComment(serial, text);
-    if (result.sent) remember(text, work.text);
+    if (result.sent) remember(text, workText ?? account);
     console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
     return;
   }

@@ -311,7 +311,15 @@ export async function openUserProfile(serial, name) {
 export function parseProfileWorks(nodes) {
   return nodes
     .filter((node) => node.text?.trim() && node.text.length > 8 && !/粉丝|获赞|关注|作品|私信|编辑主页|IP|抖音号/u.test(node.text))
-    .map((node) => ({ text: node.text.trim(), point: { x: node.bounds.cx, y: node.bounds.cy } }));
+    .map((node) => ({ text: node.text.trim(), point: { x: node.bounds.cx, y: node.bounds.cy }, bounds: node.bounds }));
+}
+
+/** 主页作品是自绘网格：文字节点不可点，要点它所在的可点容器（缩略图区域）。 */
+export function worksTiles(nodes) {
+  return nodes
+    .filter((node) => node.clickable && node.bounds.w >= 280 && node.bounds.w <= 620 && node.bounds.h >= 380 && node.bounds.h <= 900)
+    .map((node) => ({ bounds: node.bounds, point: { x: node.bounds.cx, y: node.bounds.y + Math.round(node.bounds.h * 0.38) } }))
+    .sort((a, b) => a.bounds.y - b.bounds.y || a.bounds.x - b.bounds.x);
 }
 
 /** Type into whatever comment composer is currently open and send it. */
