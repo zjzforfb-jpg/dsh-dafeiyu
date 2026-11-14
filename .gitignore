@@ -11,3 +11,8 @@ runtime/
 *.log
 standalone-ai.json
 standalone-runtime.json
+
+# Android local build state
+android/**/.gradle/
+android/**/build/
+android/**/local.properties

@@ -1,0 +1,4 @@
+mlx-audio==0.6.5
+mlx==0.32.4
+huggingface-hub==2.4.0
+socksio==1.0.0

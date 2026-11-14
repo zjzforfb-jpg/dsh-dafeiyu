@@ -27,10 +27,31 @@
     "service:start": "node scripts/service.mjs start",
     "service:uninstall": "node scripts/service.mjs uninstall",
     "data:backup": "node scripts/data.mjs backup",
-    "data:restore": "node scripts/data.mjs restore"
+    "data:restore": "node scripts/data.mjs restore",
+    "connect:start": "node scripts/connect.mjs start",
+    "connect:status": "node scripts/connect.mjs status",
+    "connect:ping": "node scripts/connect.mjs ping",
+    "connect:launch": "node scripts/connect.mjs launch",
+    "connect:pair": "node scripts/connect-pair.mjs",
+    "connect:service:install": "node scripts/connect-service.mjs install",
+    "connect:service:start": "node scripts/connect-service.mjs start",
+    "connect:service:stop": "node scripts/connect-service.mjs stop",
+    "connect:service:uninstall": "node scripts/connect-service.mjs uninstall",
+    "connect:build": "sh scripts/companion-build.sh",
+    "connect:contacts": "node scripts/connect.mjs contacts",
+    "connect:events": "node scripts/connect.mjs events",
+    "connect:event": "node scripts/connect.mjs event",
+    "connect:open-event": "node scripts/connect.mjs open-event",
+    "connect:capabilities": "node scripts/connect.mjs capabilities",
+    "connect:diagnostic": "node scripts/connect.mjs diagnostic",
+    "connect:scan": "node scripts/connect.mjs scan",
+    "connect:ilink": "node scripts/connect.mjs ilink"
   },
   "dependencies": {
-    "dsh-pet": "0.4.8"
+    "dsh-pet": "0.4.8",
+    "qrcode": "1.5.4",
+    "silk-wasm": "3.7.1",
+    "ws": "8.23.0"
   },
   "engines": {
     "node": ">=22.16.0"

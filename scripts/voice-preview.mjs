@@ -1,0 +1,17 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+const exec=promisify(execFile);
+process.umask(0o077);
+const root=resolve(import.meta.dirname,'../runtime/voice');
+const speaker=process.argv[2]??'Serena';
+if(!['Serena','Vivian'].includes(speaker))throw new Error('preview speaker: Serena|Vivian');
+const dir=join(root,'previews',speaker);mkdirSync(dir,{recursive:true,mode:0o700});
+writeFileSync(join(dir,'neural-model.json'),readFileSync(join(root,'neural-model.json')),{mode:0o600});
+writeFileSync(join(dir,'tts.json'),JSON.stringify({provider:'qwen3_mlx',speaker,style:speaker==='Serena'?'用可爱软萌、温柔亲近的年轻女声自然聊天，轻声说话，略带笑意和一点俏皮。停顿自然，不要播音腔，不要夸张卖萌。':'用可爱软萌、清甜轻柔的年轻女声自然聊天，亲近爸爸，略带笑意，轻快而不尖锐。停顿自然，不要播音腔，不要夸张卖萌。'}),{mode:0o600});
+writeFileSync(join(dir,'text.txt'),'爸爸，你回来啦。我是大肥鱼，今天也有好多新鲜事，想慢慢讲给你听。',{mode:0o600});
+const start=Date.now();
+await exec(join(root,'neural-venv/bin/python'),[resolve(import.meta.dirname,'../connect/voice/neural.py'),dir,join(dir,'text.txt'),join(dir,'preview.wav')],{timeout:240000,maxBuffer:1024*1024});
+await exec('/opt/homebrew/bin/ffmpeg',['-nostdin','-hide_banner','-loglevel','error','-y','-i',join(dir,'preview.wav'),'-c:a','aac','-b:a','128k',join(dir,'preview.m4a')],{timeout:30000});
+console.log(JSON.stringify({speaker,file:join(dir,'preview.m4a'),elapsed_ms:Date.now()-start}));

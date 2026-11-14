@@ -51,14 +51,14 @@ export function recall(db, question, limit = 5) {
   return [];
 }
 
-export function capture(db, userText, assistantText) {
+export function capture(db, userText, assistantText, provenance = {}) {
   const record = memoryRecordFromUser(userText);
   if (!record) return { turnId: null, remembered: null };
   const { content, kind } = record;
   const previous = db.prepare('SELECT source_turn_id FROM memories WHERE content = ?').get(content);
   if (previous) return { turnId: Number(previous.source_turn_id), remembered: content };
   const turn = db.prepare('INSERT INTO turns (user_text, assistant_text) VALUES (?, ?)').run(userText, assistantText);
-  db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, record.source, record.confidence);
+  db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, provenance.source ?? record.source, provenance.confidence ?? record.confidence);
   return { turnId: Number(turn.lastInsertRowid), remembered: content };
 }
 
