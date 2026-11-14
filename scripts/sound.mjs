@@ -139,8 +139,9 @@ async function main() {
     const bridge = makeBridge({ input: '', output: process.env.SOUND_OUTPUT ?? 'BlackHole 2ch', monitor: '' });
     bridge.start();
     try {
-      await bridge.say(text);
-      await new Promise((resolveWait) => setTimeout(resolveWait, 800));
+      const result = await bridge.say(text);
+      const waitMs = (result?.duration_ms ?? 3000) + 900;
+      await new Promise((resolveWait) => setTimeout(resolveWait, waitMs));
     } finally {
       await bridge.stop();
     }

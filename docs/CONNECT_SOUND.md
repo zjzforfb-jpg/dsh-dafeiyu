@@ -38,21 +38,33 @@
 
 ## 微信里的设置
 
-**微信 macOS 版没有音频设备选择。** 它跟随系统默认输入/输出，所以切换的是系统默认设备：
+微信 **Mac 4.2.54 每通电话有独立设备菜单**（通话中点「麦克风」/「扬声器」图标）：
+选项为 SG27QC、STUDIO M PRO、BlackHole 16ch、BlackHole 2ch、Mac mini 扬声器、DAW 多声道、关闭。
+
+**推荐（已实测跑通，2026-11-14 12:00）**：
+
+| 微信通话设置 | 选 |
+| --- | --- |
+| 麦克风 | **BlackHole 2ch**（大肥鱼把声音写这时，微信当它是指麦克风） |
+| 扬声器 | **BlackHole 16ch**（对方声音从这里出来，桥才能采集） |
+
+选完直接说话即可。若某次无效（微信回到默认设备），再做系统级切换：
 
 ```bash
-node scripts/sound.mjs --enable    # 输入 → BlackHole 2ch，输出 → BlackHole 16ch
+node scripts/sound.mjs --enable    # 系统输入 → BlackHole 2ch，系统输出 → BlackHole 16ch
 node scripts/sound.mjs --status    # 检查是否就绪
 ```
 
-切换后**重启一次微信**（⌘Q 再打开），让它重新读取设备。
+切换后**重启一次微信**（⌘Q 再打开），让它重新读取设备；`--enable` 会记住切换前的设备，
+通话结束 `node scripts/sound.mjs --restore` 恢复。
 
-`--enable` 会记住切换前的设备；通话结束运行 `node scripts/sound.mjs --restore` 恢复。
-你自己听对方：`--bridge` 会把从 BlackHole 16ch 听到的声音同时放给一个物理输出（默认
+你自己听对方：`--bridge` 会把从 BlackHole 16ch 听到的声音同时转放到一个物理输出（默认
 `STUDIO M PRO`，可用 `SOUND_MONITOR=...` 指定）——所以通话期间必须让 `--bridge` 一直开着。
 
-> 没有用「多输出设备」：实测聚合设备（DAW 多声道）的回路不可靠、采样率还被压到 44.1k；
-> 直接用「系统输出 = BlackHole 16ch + 软件监听到物理声卡」更稳。
+> **不要用「DAW 多声道」当微信扬声器。** 实测聚合设备只有在按 18 路写入时才会把 ch1-16
+> 映射回 BlackHole 16ch；微信是 2 路输出，声音会落到聚合设备的 ch17-18（物理 STUDIO 扬声器），
+> 桥完全采不到（ch1-16 全 0，ch17-18 只有 0.0007 的串音）。
+> 直接用「系统输出 = BlackHole 16ch + 软件监听到物理声卡」最稳。
 
 ## 启动
 
@@ -78,6 +90,23 @@ node scripts/sound.mjs --bridge         # 开始监听并自动应答（Ctrl+C �
 - 微信只认一个输入设备：大肥鱼占着麦克风时，你的声音不会被微信采集（你只能旁听）。
 - 不能主动拨号：拨出/接听仍由你在微信里操作；QQ 桌面版未安装，暂不适用。
 - 延迟仍是级联式（whisper 整段 + MiniMax 整句），不如豆包那种端到端 S2S；流式 ASR 是下一步。
+- 下行是否真的收到声音，看微信自己的日志最准：
+
+```bash
+log show --last 2m --predicate 'process == "WeChat"' --style compact | \
+  grep -E "node=(dlfev|dlout)" | grep "report_type=RMS" | tail -4
+```
+
+`node=dlfev`（对端声音）连续 `rms:-120` 表示微信根本没收到手机的声音——那是电话本身的问题
+（手机静音/权限/蓝牙），不是声卡接法的问题，别在 BlackHole 上折腾。
+
+## 已修问题（2026-11-14）
+
+- **播放截断**：audio.py 的 `output_thread.join(timeout=2)` 在只播放时 2 秒就退出，导致对方
+  只听到半句（实测「爸爸，能听到我说话吗」只剩「爸爸」）。改为 `join()` + `select` 非阻塞
+  写循环，SIGTERM 可干净退出，5.3s 的 TTS 包络连续。
+- **弱信号**：微信输出电平偏低时 VAD 抓不到，新增 `normalizePcm()` 峰值归一（最多 20 倍）
+  和 `SOUND_VAD_THRESHOLD`（默认 0.015）、`SOUND_LEVEL_LOG=1` 每秒打印电平。
 - 音量：若对方听不清，调 BlackHole 2ch 的输出音量或 MiniMax vol。
 
 ## 排障

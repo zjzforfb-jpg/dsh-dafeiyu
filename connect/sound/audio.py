@@ -10,6 +10,8 @@ Status lines are JSON on stderr so the Node supervisor can report progress.
 """
 import argparse
 import json
+import os
+import select
 import signal
 import sys
 import threading
@@ -81,17 +83,38 @@ def playback(args):
     bytes_per_block = int(args.out_rate * args.block_ms / 1000) * 2
     sys.stderr.write(json.dumps({"event": "playback", "device": info["name"], "channels": channels, "rate": args.play_rate}) + "\n")
     sys.stderr.flush()
-    with sd.OutputStream(device=index, channels=channels, samplerate=args.play_rate, dtype="float32", blocksize=frames) as stream:
-        while not stop.is_set():
-            block = sys.stdin.buffer.read(bytes_per_block)
-            if not block:
-                break
+    fd = sys.stdin.fileno()
+    pending = bytearray()
+    eof = False
+
+    def flush_blocks(stream):
+        nonlocal pending
+        while len(pending) >= bytes_per_block:
+            block = bytes(pending[:bytes_per_block])
+            del pending[:bytes_per_block]
             samples = np.frombuffer(block, dtype="<i2").astype(np.float32) / 32768.0
             samples = resample(samples, args.out_rate, args.play_rate)
             if not len(samples):
                 continue
-            out = np.repeat(samples[:, None], channels, axis=1)
-            stream.write(out)
+            stream.write(np.repeat(samples[:, None], channels, axis=1))
+
+    with sd.OutputStream(device=index, channels=channels, samplerate=args.play_rate, dtype="float32", blocksize=frames) as stream:
+        while not stop.is_set() and not eof:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if ready:
+                chunk = os.read(fd, bytes_per_block)
+                if not chunk:
+                    eof = True
+                    break
+                pending.extend(chunk)
+                flush_blocks(stream)
+        while pending and not stop.is_set():
+            remaining = bytes(pending[:bytes_per_block])
+            del pending[:bytes_per_block]
+            samples = np.frombuffer(remaining, dtype="<i2").astype(np.float32) / 32768.0
+            samples = resample(samples, args.out_rate, args.play_rate)
+            if len(samples):
+                stream.write(np.repeat(samples[:, None], channels, axis=1))
 
 
 def list_devices():
@@ -135,7 +158,7 @@ def main():
     if args.input:
         capture(args)
     if output_thread:
-        output_thread.join(timeout=2)
+        output_thread.join()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,23 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createVad } from './vad.mjs';
+
+/** Normalize quiet network audio before ASR (WeChat downlink can sit near -60 dBFS). */
+function normalizePcm(pcm, target = 0.7) {
+  let peak = 0;
+  for (let i = 0; i < pcm.length; i += 2) {
+    const value = Math.abs(pcm.readInt16LE(i)) / 32768;
+    if (value > peak) peak = value;
+  }
+  if (peak < 0.0005 || peak >= target) return pcm;
+  const gain = Math.min(20, target / peak);
+  const out = Buffer.alloc(pcm.length);
+  for (let i = 0; i < pcm.length; i += 2) {
+    const value = Math.max(-32768, Math.min(32767, Math.round(pcm.readInt16LE(i) * gain)));
+    out.writeInt16LE(value, i);
+  }
+  return out;
+}
 import { pcmToWav } from '../call/service.mjs';
 
 const SCRIPT = join(import.meta.dirname, 'audio.py');
@@ -58,13 +75,37 @@ export class SoundBridge {
       }
     });
     this.vad = createVad({
+      threshold: Number(process.env.SOUND_VAD_THRESHOLD ?? '') || undefined,
       onUtterance: (pcm) => this.#enqueue(pcm),
       onSpeechStart: () => {
         if (this.speaking) this.#cancel();
       },
     });
     this.child.stdin.on('error', () => {});
-    this.child.stdout.on('data', (chunk) => this.vad?.push(chunk));
+    const threshold = Number(process.env.SOUND_VAD_THRESHOLD ?? '') || undefined;
+    const levelLog = process.env.SOUND_LEVEL_LOG === '1';
+    let levelSum = 0;
+    let levelSamples = 0;
+    let levelAt = Date.now();
+    this.child.stdout.on('data', (chunk) => {
+      if (levelLog) {
+        let sum = 0;
+        for (let i = 0; i < chunk.length; i += 2) {
+          const value = chunk.readInt16LE(i) / 32768;
+          sum += value * value;
+        }
+        levelSum += sum;
+        levelSamples += chunk.length / 2;
+        if (Date.now() - levelAt >= 1000) {
+          const rms = Math.sqrt(levelSum / Math.max(1, levelSamples));
+          this.log(`[level] ${rms.toFixed(4)}${rms > (threshold ?? 0.015) ? '  (above threshold)' : ''}`);
+          levelSum = 0;
+          levelSamples = 0;
+          levelAt = Date.now();
+        }
+      }
+      this.vad?.push(chunk);
+    });
     this.onStatus({ state: 'running', input: this.input, output: this.output });
     return this;
   }
@@ -99,7 +140,7 @@ export class SoundBridge {
     this.controller = controller;
     const id = createHash('sha256').update(pcm).digest('hex');
     try {
-      const wav = pcmToWav(pcm, 16000);
+      const wav = pcmToWav(normalizePcm(pcm), 16000);
       const result = await this.voice.transcribeBytes(id, wav, controller.signal);
       if (!result.text) return;
       this.log(`爸爸说：${result.text}`);
@@ -131,7 +172,7 @@ export class SoundBridge {
     this.speaking = true;
     this.onStatus({ state: 'speaking', text });
     try {
-      await this.voice.streamSynthesize(id, text, controller.signal, {
+      return await this.voice.streamSynthesize(id, text, controller.signal, {
         onPcm: (chunk) => this.#play(chunk),
       });
     } finally {
@@ -151,10 +192,18 @@ export class SoundBridge {
   async stop() {
     this.stopping = true;
     this.#cancel();
-    if (this.child) {
-      this.child.stdin.end();
-      this.child.kill('SIGTERM');
-      this.child = null;
+    const child = this.child;
+    this.child = null;
+    if (child) {
+      const exited = new Promise((resolveExit) => child.once('exit', resolveExit));
+      try {
+        child.stdin.end();
+      } catch {
+        /* already closed */
+      }
+      const timeout = new Promise((resolveTimeout) => setTimeout(resolveTimeout, 5000));
+      await Promise.race([exited, timeout]);
+      if (child.exitCode === null) child.kill('SIGTERM');
     }
     this.onStatus({ state: 'stopped' });
   }
