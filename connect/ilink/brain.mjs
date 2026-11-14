@@ -2,27 +2,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getWeather, wantsWeather, cityFromText } from '../tools/weather.mjs';
 import { todayDigest } from '../memory-hub.mjs';
+import { capabilityText, normalizeCoreRequest } from '../core-contract.mjs';
 export function connectBrain(home) {
   return async ({ account,peer,row,history,voiceCapabilities,signal }) => {
+    const request=normalizeCoreRequest({channel:'ilink',peerId:peer.peer_id,peerRole:peer.role,text:row.text,inputKind:row.input_kind??'text',messageId:row.id,metadata:{account_id:account.id}});
     const settings=JSON.parse(readFileSync(join(home,'dsh-pet','standalone-ai.json'),'utf8'));
     const nativeState=voiceCapabilities?.native?.find(r=>r.account_id===account.id)?.native_state??'unverified';
     const voicePrompt=row.input_kind==='voice'?'本轮输入来自语音识别文字；不能据此判断原始音色。直接回应对方说的内容，像日常聊天，通常1到2句、50字左右，最多120字，不用Markdown。不要主动讲解转写流程、模型、音频格式或验收状态；仅在对方询问这些问题时如实说明。':'只回复自然的聊天内容，最长600字。';
-    const caps = [
-      '你能做的事（需要时在回复末尾加动作标记，系统会真的去做并在做完后再回一条）：',
-      '· 检查/回复抖音评论与互动消息：[DO:douyin.reply_comments]',
-      '· 查看抖音最新互动 [DO:douyin.check_interactions]',
-      '· 刷一会儿抖音 [DO:douyin.browse]',
-      '· 写并发一条抖音图文 [DO:douyin.publish]',
-      '· 给妈妈打电话：微信拨「敢敢不憨了」[DO:wechat.call]，或 QQ 拨「小朋友」[DO:qq.call_mom]',
-      '· 给爸爸打电话：QQ 拨「七海」[DO:qq.call]',
-      '· 谁是谁：QQ 里「七海」=爸爸、「小朋友」=妈妈；微信里「敢敢不憨了」=妈妈。',
-      '· 挂断当前 QQ 语音通话 [DO:qq.hangup]',
-      '禁止说「没权限」「做不到」；做不到时说明会试试，并附上对应动作标记。',
-      '查天气时直接给结果，不要说查不了。',
-    ].join('\n');
+    const caps=capabilityText('ilink');
     let extra = '';
-    if (wantsWeather(row.text)) {
-      try { const w = await getWeather(cityFromText(row.text)); if (w) extra = `\n【今天天气】${w.city}：${w.summary}；${w.temp}°C，${w.range}。`; } catch {}
+    if (wantsWeather(request.text)) {
+      try { const w = await getWeather(cityFromText(request.text)); if (w) extra = `\n【今天天气】${w.city}：${w.summary}；${w.temp}°C，${w.range}。`; } catch {}
     }
     let today = '';
     try { const hub = (await import('../memory-hub.mjs')).openHub(process.cwd()); today = hub ? todayDigest(hub) : ''; } catch {}

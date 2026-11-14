@@ -7,11 +7,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runAction, ACTIONS } from './actions.mjs';
 import { sendApprovalRequest } from './approvals.mjs';
+import { loadTargets } from './targets.mjs';
 
-export const QQ = {
-  haihai: '8A3C593FF757BAEF5659309C7CE6D1F2', // 七海（爸爸）
-  group: '75F262F4581769B848089378E4371883',   // 大肥鱼小可爱
-};
+/** 兼容旧调用：目标 ID 现在从 runtime/connect/targets.json 读取。 */
+export const QQ = { get haihai() { return loadTargets().qq.dad; }, get group() { return loadTargets().qq.group; } };
 
 function dir(root) { return join(root, 'runtime', 'plans'); }
 function file(root) { return join(dir(root), 'queue.json'); }

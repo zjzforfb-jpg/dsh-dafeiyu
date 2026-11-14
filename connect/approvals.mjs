@@ -50,7 +50,7 @@ export async function sendApprovalRequest({ root = process.cwd(), target = '大�
 }
 
 /** 打开 connect 库，轮询是否有人同意。 */
-export function waitApproval({ root = process.cwd(), sinceMs, convId = '75F262F4581769B848089378E4371883', timeoutMs = 15 * 60_000, intervalMs = 5000 } = {}) {
+export function waitApproval({ root = process.cwd(), sinceMs, convId = loadTargets(root).qq.group, timeoutMs = 15 * 60_000, intervalMs = 5000 } = {}) {
   const dbFile = join(root, 'runtime', 'connect', 'connect.sqlite');
   return waitFor(() => {
     if (!existsSync(dbFile)) return null;

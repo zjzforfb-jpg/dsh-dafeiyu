@@ -5,9 +5,10 @@
  */
 import { join } from 'node:path';
 import { openMemory, capture } from '../brain/memory.mjs';
+import { initDailyMemory } from './daily-memory.mjs';
 
 export function openHub(root) {
-  return openMemory(join(root, 'runtime', 'dsh-home', 'dafeiyu-memory.sqlite'));
+  const db=openMemory(join(root, 'runtime', 'dsh-home', 'dafeiyu-memory.sqlite'));initDailyMemory(db);return db;
 }
 
 /** 记一条「我做了什么」：power 活动日志，供回忆与「今天干了什么」使用。 */

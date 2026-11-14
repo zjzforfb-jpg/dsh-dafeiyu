@@ -12,6 +12,7 @@ import { CallSessions } from '../connect/qq/call.mjs';
 import { QqService } from '../connect/qq/service.mjs';
 import { openMemory } from '../brain/memory.mjs';
 import { listMemories } from '../connect/qq/memory.mjs';
+import { approveTask, initTasks, latestPendingTask, proposeTask, startTask } from '../connect/tasks.mjs';
 
 const KIND = 'c2c', CONV = 'user-openid-0001', TS = Date.UTC(2026, 10, 14, 1, 0);
 const response = data => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -120,6 +121,45 @@ test('QQ service holds unknown peers, replies once per message, and keeps duplic
   assert.equal(sent.length, 1);
   assert.equal(qq.row(key('m-2')).status, 'sent');
   db.close();
+});
+
+test('group external requests become confirmation tasks and do not execute from an acknowledgement', async () => {
+  const db = setup(); savePeer(db, { kind: 'group', id: 'group-openid-1' });
+  const sent = []; let executed = 0;
+  const qq = service(db, { api: { sendText: async value => { sent.push(value); } }, root: process.cwd() });
+  // A deterministic task intent is created before the chat model is called.
+  await qq.handle({ kind: 'group', id: 'group-openid-1', messageId: 'task-1', text: '大肥鱼，去维护一下评论区，该回复回复，该点赞点赞', attachments: [], memberId: 'dad' });
+  const pending = latestPendingTask(db, 'group', 'group-openid-1');
+  assert.ok(pending); assert.equal(pending.status, 'awaiting_confirmation'); assert.match(sent.at(-1).content, /要现在执行吗/u);
+  assert.equal(executed, 0);
+  // This regression test deliberately does not approve the task, so it cannot
+  // touch a real Douyin account while the adapter is under development.
+  assert.equal(db.prepare('SELECT status FROM external_tasks WHERE id=?').get(pending.id).status, 'awaiting_confirmation');
+  db.close();
+});
+
+test('phase zero freezes legacy external action markers in group replies', async () => {
+  const db = setup(); savePeer(db, { kind: 'group', id: 'group-openid-1' });
+  const sent = [];
+  const qq = service(db, { api: { sendText: async value => { sent.push(value); } }, ask: async () => '我来处理 [DO:douyin.reply_comments]' });
+  await qq.handle({ kind: 'group', id: 'group-openid-1', messageId: 'freeze-1', text: '帮忙看看', attachments: [], memberId: 'dad', atMe: true });
+  assert.match(sent.at(-1).content, /外部操作目前已暂停/u);
+  assert.equal(db.prepare('SELECT status FROM external_tasks').get(), undefined);
+  db.close();
+});
+
+test('task recovery marks interrupted approved/running work unknown and prevents duplicate approval', () => {
+  const db=setup();initTasks(db);const intent={intent:'douyin.manage_comments',operations:['douyin.reply_comments'],target:'my_latest_work',requires_confirmation:true};
+  const row=proposeTask(db,{kind:'c2c',convId:CONV,sourceMessageId:'recover-1',intent,proposerPeerId:'dad'});
+  assert.equal(approveTask(db,row.id,'dad'),true);assert.equal(startTask(db,row.id),true);assert.equal(startTask(db,row.id),false);assert.equal(db.prepare('SELECT approver_peer_id FROM external_tasks WHERE id=?').get(row.id).approver_peer_id,'dad');
+  initTasks(db);assert.equal(db.prepare('SELECT status FROM external_tasks WHERE id=?').get(row.id).status,'unknown');db.close();
+});
+
+test('QQ private action markers become confirmation tasks instead of running immediately', async () => {
+  const db=setup();savePeer(db,{kind:'c2c',id:CONV,label:'爸爸'});const sent=[];
+  const qq=service(db,{api:{sendText:async value=>sent.push(value)},ask:async()=> '我马上去看 [DO:douyin.reply_comments]'});
+  await qq.handle({kind:'c2c',id:CONV,messageId:'private-task-1',text:'去看看评论',attachments:[]});
+  const taskRow=db.prepare("SELECT status,payload FROM external_tasks WHERE conv_kind='c2c'").get();assert.equal(taskRow.status,'awaiting_confirmation');assert.match(sent.at(-1).content,/待确认任务/u);db.close();
 });
 
 test('QQ voice input is transcribed and answered with a voice bar, falling back to text when synthesis fails', async () => {
@@ -273,4 +313,11 @@ test('QQ group replies carry speaker labels and skip messages aimed at other mem
   assert.equal(last.speaker, '群友2');
   assert.ok(last.history.some(item => item.role === 'user' && String(item.content).startsWith('群友1：')), 'group history should label speakers');
   assert.ok(last.history.some(item => item.role === 'assistant'), 'group history should include own replies');
+});
+
+test('QQ group memory never writes private long-term facts', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'dafeiyu-qq-group-memory-'));const memory=openMemory(join(dir,'dafeiyu-memory.sqlite'));const db=setup();savePeer(db,{kind:'group',id:'group-openid-1'});
+  const qq=service(db,{memory,home:dir,api:{sendText:async()=>{}},ask:async()=> '记住啦'});
+  await qq.handle({kind:'group',id:'group-openid-1',messageId:'memory-group-1',text:'请记住：爸爸的私密爱好是紫色星云',attachments:[],memberId:'dad',atMe:true});
+  assert.equal(memory.prepare('SELECT COUNT(*) AS n FROM memories').get().n,0);db.close();memory.close();rmSync(dir,{recursive:true,force:true});
 });

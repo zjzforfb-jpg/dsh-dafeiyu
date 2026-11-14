@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { startBrain } from '../brain/server.mjs';
-import { memoryFromUser, memoryRecordFromUser, openMemory } from '../brain/memory.mjs';
+import { capture, memoryFromUser, memoryRecordFromUser, openMemory, recall } from '../brain/memory.mjs';
 import { openLife } from '../life/manager.mjs';
 
 test('长期记忆不收录常见秘密', () => {
@@ -31,6 +31,31 @@ test('旧版记忆库升级后保留原有事实', () => {
     assert.equal(row.kind, 'user_fact');
     db.close();
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('长期记忆检索综合相关性、可信度并记录访问信号', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dafeiyu-recall-'));
+  const db = openMemory(join(home, 'memory.sqlite'));
+  try {
+    db.prepare("INSERT INTO memories (content, kind, source, confidence, created_at) VALUES (?, 'user_fact', 'test', ?, datetime('now'))").run('爸爸喜欢草莓和温柔的语气', 1);
+    db.prepare("INSERT INTO memories (content, kind, source, confidence, created_at) VALUES (?, 'user_fact', 'test', ?, datetime('now'))").run('爸爸喜欢水果', 0.3);
+    assert.deepEqual(recall(db, '爸爸喜欢草莓', 1)[0].content, '爸爸喜欢草莓和温柔的语气');
+    assert.equal(db.prepare('SELECT access_count FROM memories WHERE content = ?').get('爸爸喜欢草莓和温柔的语气').access_count, 1);
+    assert.deepEqual(recall(db, '', 5), []);
+  } finally { db.close(); rmSync(home, { recursive: true, force: true }); }
+});
+
+test('明确保存的长期记忆会生成可审计的结构化事实投影', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dafeiyu-facts-'));
+  const db = openMemory(join(home, 'memory.sqlite'));
+  try {
+    const result = capture(db, '请记住：我喜欢草莓', '好的爸爸');
+    const fact = db.prepare('SELECT subject, predicate, object_text, status FROM memory_facts WHERE memory_id = ?').get(result.memoryId);
+    assert.equal(fact.subject, 'owner');
+    assert.equal(fact.predicate, 'fact');
+    assert.equal(fact.object_text, '我喜欢草莓');
+    assert.equal(fact.status, 'confirmed');
+  } finally { db.close(); rmSync(home, { recursive: true, force: true }); }
 });
 
 test('明确保存的记忆在新一轮对话中被召回', async () => {

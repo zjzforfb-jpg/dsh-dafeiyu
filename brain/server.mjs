@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { openMemory, recall, capture, reviseMemory, forgetMemory } from './memory.mjs';
 import { classifyConversation, publishDesktopActivity } from '../desktop/activity.mjs';
+import { recordDailyExchange } from '../connect/daily-memory.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
@@ -161,7 +162,10 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
       if (!body.stream) {
         const data = await upstream.json();
         const answer = data.choices?.[0]?.message?.content;
-        if (!isFriend && typeof answer === 'string' && answer.trim()) capture(db, userText, answer, provenance);
+        if (!isFriend && typeof answer === 'string' && answer.trim()) {
+          capture(db, userText, answer, provenance);
+          if (!connectScope) recordDailyExchange(db,{channel:'desktop',conversationKind:'direct',peerId:'desktop',inputKind:'text',userText,assistantText:answer,privacyScope:'private',importance:0.7});
+        }
         if (typeof answer === 'string' && answer.trim()) void finishActivity('done');
         else void finishActivity('error', 'error');
         sendJson(res, 200, data);
@@ -182,7 +186,10 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
           answer += parseSseText(block);
         }
       }
-      if (!isFriend && completed && answer.trim()) capture(db, userText, answer, provenance);
+      if (!isFriend && completed && answer.trim()) {
+        capture(db, userText, answer, provenance);
+        if (!connectScope) recordDailyExchange(db,{channel:'desktop',conversationKind:'direct',peerId:'desktop',inputKind:'text',userText,assistantText:answer,privacyScope:'private',importance:0.7});
+      }
       if (completed && answer.trim()) void finishActivity('done');
       else void finishActivity('error', 'error');
       res.end();

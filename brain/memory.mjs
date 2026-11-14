@@ -30,19 +30,44 @@ export function memoryFromUser(text) {
 }
 
 function terms(text) {
-  const normalized = text.toLowerCase();
+  const normalized = String(text ?? '').toLowerCase();
   const out = new Set(normalized.match(/[a-z0-9]{2,}/g) ?? []);
   const han = [...normalized.matchAll(/[\p{Script=Han}]/gu)].map(([char]) => char);
   for (let i = 0; i < han.length - 1; i += 1) out.add(han[i] + han[i + 1]);
   return out;
 }
 
-export function recall(db, question, limit = 5) {
-  const rows = db.prepare('SELECT id, content, kind, source, confidence, created_at FROM memories WHERE active = 1 AND include_context = 1 ORDER BY id DESC LIMIT 300').all();
+function recency(createdAt) {
+  const time = Date.parse(String(createdAt ?? '').replace(' ', 'T') + (String(createdAt).includes('Z') ? '' : 'Z'));
+  if (!Number.isFinite(time)) return 0.5;
+  const ageDays = Math.max(0, (Date.now() - time) / 86_400_000);
+  return Math.exp(-ageDays / 180);
+}
+
+/**
+ * 可解释的混合召回：关键词相关性 + 语义短语命中 + 可信度 + 时间衰减。
+ * 保留旧的 recall(db, question, limit) 调用形式，同时支持结构化过滤。
+ */
+export function recall(db, question, limit = 5, options = {}) {
+  if (typeof limit === 'object') { options = limit; limit = options.limit ?? 5; }
+  const safeLimit = Math.max(1, Math.min(30, Number(limit) || 5));
+  if (!String(question ?? '').trim()) return [];
+  const rows = db.prepare(`SELECT id, content, kind, source, confidence, created_at, last_accessed_at, access_count
+    FROM memories WHERE active = 1 AND include_context = 1
+    AND (expires_at IS NULL OR expires_at > datetime('now'))
+    ${options.kind ? 'AND kind = ?' : ''}
+    ORDER BY id DESC LIMIT 1000`).all(...(options.kind ? [String(options.kind)] : []));
   const query = terms(question);
+  const phrase = String(question ?? '').trim().toLowerCase();
   const scored = rows.map((row) => {
-    const overlap = [...terms(row.content)].filter((term) => query.has(term)).length;
-    return { ...row, score: overlap };
+    const rowTerms = terms(row.content);
+    const overlap = [...rowTerms].filter((term) => query.has(term)).length;
+    const coverage = query.size ? overlap / query.size : 0;
+    const exactPhrase = phrase.length >= 4 && String(row.content).toLowerCase().includes(phrase) ? 1 : 0;
+    const confidence = Math.max(0, Math.min(1, Number(row.confidence) || 0));
+    const freshness = recency(row.created_at);
+    const score = exactPhrase * 4 + overlap * 1.5 + coverage * 2 + confidence * 1.5 + freshness * 0.35;
+    return { ...row, score, match: { exactPhrase, overlap, coverage, confidence, freshness } };
   });
   scored.sort((a, b) => b.score - a.score || b.id - a.id);
   const relevant = scored.filter((row) => row.score > 0).slice(0, limit);
@@ -50,11 +75,15 @@ export function recall(db, question, limit = 5) {
     const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
     const activities = db.prepare("SELECT id, content, kind, source, confidence, created_at FROM memories WHERE kind = 'activity' AND active = 1 AND content LIKE ? ORDER BY id DESC LIMIT 8")
       .all(`【活动·${stamp}】%`).reverse();
-    if (activities.length) return [...activities, ...relevant].slice(0, activities.length + limit);
+    if (activities.length) return [...activities, ...relevant].slice(0, activities.length + safeLimit);
   }
-  if (relevant.length > 0) return relevant;
-  if (/记得|记住|以前|之前|关于我/u.test(question)) return scored.slice(0, limit);
-  return [];
+  const result = relevant.length > 0 ? relevant : (/记得|记住|以前|之前|关于我/u.test(String(question)) ? scored.slice(0, safeLimit) : []);
+  if (result.length) {
+    const ids = result.map((row) => row.id);
+    const marks = ids.map(() => '?').join(',');
+    db.prepare(`UPDATE memories SET access_count = COALESCE(access_count, 0) + 1, last_accessed_at = datetime('now') WHERE id IN (${marks})`).run(...ids);
+  }
+  return result;
 }
 
 export function capture(db, userText, assistantText, provenance = {}) {
@@ -64,8 +93,18 @@ export function capture(db, userText, assistantText, provenance = {}) {
   const previous = db.prepare('SELECT source_turn_id FROM memories WHERE content = ?').get(content);
   if (previous) return { turnId: Number(previous.source_turn_id), remembered: content };
   const turn = db.prepare('INSERT INTO turns (user_text, assistant_text) VALUES (?, ?)').run(userText, assistantText);
-  db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, provenance.source ?? record.source, provenance.confidence ?? record.confidence);
-  return { turnId: Number(turn.lastInsertRowid), remembered: content };
+  const source = provenance.source ?? record.source;
+  const confidence = provenance.confidence ?? record.confidence;
+  const inserted = db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, source, confidence);
+  const memoryId = Number(inserted.lastInsertRowid);
+  if (['user_fact', 'pet_preference', 'shared_episode'].includes(kind)) {
+    const subject = kind === 'pet_preference' ? 'pet' : 'owner';
+    const predicate = kind === 'pet_preference' ? 'preference' : kind === 'shared_episode' ? 'shared_episode' : 'fact';
+    db.prepare(`INSERT OR IGNORE INTO memory_facts
+      (memory_id, subject, predicate, object_text, status, confidence, source)
+      VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`).run(memoryId, subject, predicate, content, confidence, source);
+  }
+  return { turnId: Number(turn.lastInsertRowid), remembered: content, memoryId };
 }
 
 export function reviseMemory(db, id, nextContent, reason = '用户明确纠正') {
@@ -80,6 +119,7 @@ export function reviseMemory(db, id, nextContent, reason = '用户明确纠正')
   try {
     db.prepare('INSERT INTO memory_revisions (memory_id, old_content, new_content, reason) VALUES (?, ?, ?, ?)').run(Number(id), old.content, content, reason);
     db.prepare("UPDATE memories SET content = ?, source = 'user_correction', confidence = 1, include_context = 1 WHERE id = ?").run(content, Number(id));
+    db.prepare("UPDATE memory_facts SET object_text = ?, confidence = 1, source = 'user_correction', updated_at = datetime('now') WHERE memory_id = ?").run(content, Number(id));
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
   return { id: Number(id), changed: true };

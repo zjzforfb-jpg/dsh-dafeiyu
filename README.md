@@ -111,6 +111,12 @@ npm run service:start
 
 桌宠自身默认关闭随机碎碎念、余额查询和语音。微信 Bot 的语音能力单独管理，见下方 Connect 说明。启用日常生命循环后，计划时间会主动请求模型，最多两项任务、每项最多两次尝试。事实和共同回忆需要爸爸明确要求保存；每日小探索会作为低置信度的自我反思另存。密码、验证码和密钥等常见秘密不会写入长期记忆。安卓与微信已接入下述受限能力；开放网页探索、其他社交平台和购物仍待实施。
 
+## 授权与素材
+
+- **代码**：MIT，见 [LICENSE](LICENSE)；
+- **「大肥鱼」形象/动画/插图**：来自上游 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，按 **CC BY-NC-SA 4.0**（署名、非商业、相同方式共享）使用；
+- 仓库不包含运行期数据、模型文件、个人配置或第三方平台内容，细节见 [NOTICE.md](NOTICE.md)。
+
 上游代码与素材见 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。其代码采用 MIT 许可；动画素材和“大肥鱼”形象有单独的授权条件，形象说明为 CC BY-NC-SA 4.0（署名、非商业、相同方式共享）。若计划公开发布或商业化，先核对上游最新授权与形象权利人的许可。
 
 ## DaFeiYu Connect（M0）
@@ -128,3 +134,11 @@ npm run service:start
 新增语音处理：本机 whisper.cpp 中文识别、DeepSeek 回复和音频发送。微信语音接收、识别、AI 回复、音频附件送达与播放均已实机验收，用户确认收到 M4A 文件且能播放。后续按“可爱软萌的女孩”要求启用本地 Qwen3-TTS / Vivian，替换首版 Tingting；本机试听、合成封装与28项测试通过，新音色的微信听感待后续确认。原生语音气泡因未收到而关闭，当前默认语音输入回复音频文件，文字输入回复文字。命令、验收记录与限制见 [CONNECT_VOICE.md](docs/CONNECT_VOICE.md)。图片与电话能力仍待实施。
 
 最新音色反馈：用户认为 Vivian 不合格，已重新生成 MiniMax Speech 2.8 HD 的“软软女孩 / 俏皮萌妹”两份短试听。云端适配与完整封装测试通过，全套30项测试通过；候选尚未设为默认，等待用户按实际听感选择。启用后合成回复文字将发给 MiniMax 并按量计费，详见上述语音文档。
+
+缺陷治理和稳定化标准见 [BUG_REMEDIATION_PLAN.md](docs/BUG_REMEDIATION_PLAN.md)。该计划规定任务、权限、回执、测试、实机验收和观察窗口；`FEATURES.md` 中的能力在没有实机回执和稳定性观察前，不视为稳定产品能力。
+
+当前能力状态以 [CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md) 为准。
+
+记忆分层说明见 [MEMORY_MODEL.md](docs/MEMORY_MODEL.md)：每日渠道消息进入短期日记忆，凌晨整理为当天摘要，长期记忆仍需符合来源、隐私和重要度规则。
+
+长期记忆与搜索优化路线见 [MEMORY_OPTIMIZATION_PLAN.md](docs/MEMORY_OPTIMIZATION_PLAN.md)。

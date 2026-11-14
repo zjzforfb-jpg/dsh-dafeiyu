@@ -176,6 +176,41 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 9,
+    name: 'memory-retrieval-signals',
+    up(db) {
+      if (!hasColumn(db, 'memories', 'last_accessed_at')) db.exec('ALTER TABLE memories ADD COLUMN last_accessed_at TEXT');
+      if (!hasColumn(db, 'memories', 'access_count')) db.exec('ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0');
+      if (!hasColumn(db, 'memories', 'expires_at')) db.exec('ALTER TABLE memories ADD COLUMN expires_at TEXT');
+      if (!hasColumn(db, 'memories', 'tags')) db.exec('ALTER TABLE memories ADD COLUMN tags TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS memories_retrieval ON memories(active, include_context, kind, confidence, created_at)');
+    },
+  },
+  {
+    version: 10,
+    name: 'structured-memory-facts',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS memory_facts (
+          id INTEGER PRIMARY KEY,
+          memory_id INTEGER NOT NULL UNIQUE REFERENCES memories(id) ON DELETE CASCADE,
+          subject TEXT NOT NULL,
+          predicate TEXT NOT NULL,
+          object_text TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate','confirmed','superseded','rejected')),
+          confidence REAL NOT NULL DEFAULT 0.5,
+          source TEXT,
+          valid_from TEXT,
+          valid_to TEXT,
+          supersedes_id INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS memory_facts_lookup ON memory_facts(status, subject, predicate, confidence);
+      `);
+    },
+  },
 ];
 
 export function latestVersion() { return MIGRATIONS.at(-1)?.version ?? 0; }

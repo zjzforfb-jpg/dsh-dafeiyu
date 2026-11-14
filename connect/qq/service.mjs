@@ -5,10 +5,12 @@ import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
 import { captureExchange, todayDigest } from '../memory-hub.mjs';
-import { actionMarkerNames, stripActionMarkers, runAction, ACTIONS } from '../actions.mjs';
-import { addPlan, runPlan } from '../plans.mjs';
+import { actionMarkerNames, stripActionMarkers, runAction } from '../actions.mjs';
 import { ensureBinaries } from '../macui/index.mjs';
 import { hangup as hangupQqCall } from '../macui/qq.mjs';
+import { approveTask, completeTask, initTasks, latestPendingTask, parseExternalIntent, proposeTask, startTask, taskPayload } from '../tasks.mjs';
+import { createReceipt } from '../receipts.mjs';
+import { recordDailyExchange, recordDailyMessage } from '../daily-memory.mjs';
 import { join } from 'node:path';
 import { conversationHistory, dayKey, groupTranscript, initQq, logInbound, memberLabel, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
 
@@ -35,6 +37,7 @@ export class QqService {
   constructor({ db, voice, api, ask, WebSocketImpl, gateway, memory = null, home = null, petPort = 3108, log = () => {}, now = () => Date.now(), callTimeoutMs = 60000, downloadImpl = fetch, groupReplyRate = 0.08, groupCooldownMs = 90000, groupNameCooldownMs = 25000, random = Math.random }) {
     this.root = home ? join(home, '..', '..') : process.cwd();
     initQq(db);
+    initTasks(db);
     Object.assign(this, { db, voice, api, ask, log, now, downloadImpl, memory, home, petPort, groupReplyRate, groupCooldownMs, groupNameCooldownMs, random, messageUrl: null });
     this.ambientAt = new Map();
     this.calls = new CallSessions({ timeoutMs: callTimeoutMs, now });
@@ -117,6 +120,36 @@ export class QqService {
     const voiceAttachment = attachments.find(isVoiceAttachment) ?? null;
     const inputKind = voiceAttachment ? 'voice' : 'text';
     if (!logInbound(this.db, { id: messageKey, kind, convId: id, msgId: messageId ?? null, inputKind, text, createdMs: this.now(), author: memberId })) return { duplicate: true };
+    if(this.memory)try{recordDailyMessage(this.memory,{channel:'qq',conversationKind:kind,peerId:id,speaker:kind==='group'?memberId:null,inputKind,role:'user',content:text,messageId:String(messageId??messageKey),privacyScope:kind==='group'?'group':'private',importance:kind==='group'?0.25:0.6,at:new Date(this.now())});}catch{}
+
+    // External actions are planned outside the chat model. A bare acknowledgement
+    // never executes a platform action; only an explicit confirmation can approve it.
+    const pending = latestPendingTask(this.db, kind, id);
+    // Group members can propose a task, but only the owner's private chat can approve it.
+    if (pending && kind === 'c2c' && allowed.label === '爸爸' && /^(同意|确认|执行|可以|好的|好)$/u.test(String(text).trim())) {
+      if (!approveTask(this.db, pending.id, id, this.now())) return { held: true, error: 'task_already_processed' };
+      if (!startTask(this.db, pending.id, this.now())) return { held: true, error: 'task_recovery_required' };
+      const payload = taskPayload(pending);
+      const results=[]; let ok=true;
+      for (const name of payload?.operations??[]) {
+        const result=await runAction(name,{root:this.root});
+        const receipt=createReceipt({operation:name,adapter:'douyin',result});results.push(receipt);if(receipt.status!=='succeeded')ok=false;
+      }
+      completeTask(this.db,pending.id,{ok,result:results},this.now());
+      const receipt=ok?'任务已执行完成，我会按真实回执告诉你结果。':'任务执行未完全成功，我会把失败步骤说明白。';
+      await this.sendTextSafe(kind,id,receipt,messageId);
+      updateMessage(this.db,messageKey,{status:'sent',reply:receipt,delivery_kind:'text'});
+      return {task_id:pending.id,status:ok?'succeeded':'failed'};
+    }
+    const intent=parseExternalIntent(text);
+    if (intent && (kind==='group'||kind==='c2c')) {
+      const task=proposeTask(this.db,{kind,convId:id,sourceMessageId:messageId,intent,proposerPeerId:memberId,now:this.now()});
+      const names=intent.operations.map(name=>name==='douyin.reply_comments'?'回复新评论':'给相关评论点赞');
+      const reply=`爸爸，我识别到两个动作：${names.join('、')}。这会操作抖音账号。要现在执行吗？任务编号：${task.id}`;
+      await this.sendTextSafe(kind,id,reply,messageId);
+      updateMessage(this.db,messageKey,{status:'sent',reply,delivery_kind:'text'});
+      return {task_id:task.id,status:'awaiting_confirmation'};
+    }
 
     const allowed = peer(this.db, kind, id);
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
@@ -228,15 +261,29 @@ export class QqService {
     const wantsHangup = /\[HANGUP\]/i.test(reply);
     if (wantsHangup) reply = reply.replace(/\[HANGUP\]/giu, '').trim();
     const actions = actionMarkerNames(reply);
+    if (wantsHangup) actions.push('qq.hangup');
     if (actions.length) reply = stripActionMarkers(reply);
+    if (kind === 'group' && actions.length) {
+      // Phase 0 safety freeze: keep group chat conversational and never execute
+      // external actions from a group, including legacy [DO:...] markers.
+      reply = `${reply} 群聊里的外部操作目前已暂停，请爸爸私聊确认。`;
+      actions.length = 0;
+    }
+    if (kind === 'c2c' && actions.length) {
+      const task=proposeTask(this.db,{kind,convId:id,sourceMessageId:messageId,intent:{intent:'external_action_request',operations:[...actions],target:'user_requested',requires_confirmation:true},proposerPeerId:id,now:this.now()});
+      reply=`${reply} 外部操作已创建待确认任务 ${task.id}，回复“同意”后才会执行。`;
+      actions.length=0;
+    }
     updateMessage(this.db, messageKey, { status: 'ready', reply });
     if (this.memory) {
+      try { recordDailyMessage(this.memory,{channel:'qq',conversationKind:kind,peerId:id,speaker,inputKind,role:'assistant',content:reply,messageId:`${messageKey}:reply`,privacyScope:kind==='group'?'group':'private',importance:kind==='group'?0.25:0.6,at:new Date(this.now())}); } catch {}
+    }
+    if (this.memory && kind !== 'group') {
       try { rememberExchange(this.memory, spoken, reply); } catch {}
       try { captureExchange(this.memory, spoken, reply, { source: kind === 'group' ? 'qq_group' : 'qq' }); } catch {}
     }
     this.publish(`qq:${messageKey}:out`, { phase: 'done', message: `大肥鱼：${reply.slice(0, 40)}` });
 
-    if (wantsHangup) { try { await this.hangupCall(); } catch {} }
     const inCall = Boolean(this.calls.active(kind, id));
     const wantVoice = Boolean(this.voice) && (inCall || (inputKind === 'voice' && allowed.voiceReply));
     if (wantVoice) {
@@ -257,34 +304,11 @@ export class QqService {
       await this.api.sendText({ kind, id, content: reply, msgId: messageId });
       updateMessage(this.db, messageKey, { status: 'sent', delivery_kind: 'text' });
       if (inCall) this.calls.touch(kind, id);
-      if (actions.length > 1) this.#runPlanLater(actions, kind, id);
-      else for (const name of actions) this.#runActionLater(name, kind, id);
       return { replied: 'text', actions };
     } catch (error) {
       updateMessage(this.db, messageKey, { status: 'unknown', error: 'delivery_not_confirmed' });
       return { error: 'delivery_not_confirmed' };
     }
-  }
-
-  #runPlanLater(names, kind, convId) {
-    Promise.resolve().then(async () => {
-      const plan = addPlan(this.root, { steps: names.map((name) => ({ name })), origin: 'qq' });
-      const order = names.map((name, index) => `${index + 1}) ${ACTIONS[name]?.label ?? name}`).join('，');
-      try { await this.api.sendText({ kind, id: convId, content: `好，我按顺序来：${order}。做完一件跟你说一件。` }); } catch {}
-      const result = await runPlan(this.root, plan, { log: (line) => this.log?.({ plan: line }) });
-      const text = result.ok ? `计划里的 ${result.steps} 件事都做完了。` : `计划里「${ACTIONS[result.failedStep]?.label ?? result.failedStep}」这一步没做成，我先跟爸爸说一声。`;
-      try { await this.api.sendText({ kind, id: convId, content: text }); } catch {}
-    });
-  }
-
-  #runActionLater(name, kind, convId) {
-    const label = ACTIONS[name]?.label ?? name;
-    Promise.resolve().then(async () => {
-      const result = await runAction(name, { root: this.root });
-      const text = result.ok ? `${label}：${result.text || '做完了'}` : `${label}失败：${result.error}`;
-      try { await this.api.sendText({ kind, id: convId, content: text }); } catch {}
-      this.log({ action: name, ok: result.ok });
-    });
   }
 
   sweep() {

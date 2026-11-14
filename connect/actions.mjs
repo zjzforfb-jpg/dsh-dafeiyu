@@ -17,6 +17,14 @@ export const ACTIONS = {
       return summarize(stdout) || '抖音互动回复已处理。';
     },
   },
+  'douyin.like_comments': {
+    label: '给抖音相关评论点赞',
+    async run() {
+      // The current Douyin adapter has no verified like operation. Keep this as
+      // an explicit failed task instead of silently treating “like” as “reply”.
+      throw new Error('douyin_like_not_implemented');
+    },
+  },
   'douyin.check_interactions': {
     label: '看抖音有没有新互动',
     async run({ root }) {
@@ -44,7 +52,7 @@ export const ACTIONS = {
       await sleep(4000);
       const { dumpUi } = await import('../device/uia.mjs');
       const signature = async () => {
-        const nodes = await dumpUi('ARMR023302000316').catch(() => []);
+        const nodes = await dumpUi(loadTargets(root).deviceSerial).catch(() => []);
         const longest = nodes.filter((x) => (x.text ?? '').length > 12).map((x) => x.text.trim()).sort((a, b) => b.length - a.length)[0] ?? '';
         return longest.slice(0, 40);
       };

@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openHub, recordActivity } from '../connect/memory-hub.mjs';
+import { dailyEvents, markDailyDigested, purgeDailyMemory } from '../connect/daily-memory.mjs';
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -20,12 +21,13 @@ const hub = openHub(root);
 if (!hub) { console.error('memory_hub_unavailable'); process.exit(1); }
 
 const rows = hub.prepare("SELECT content, created_at FROM memories WHERE kind='activity' AND content LIKE ? ORDER BY id").all(`【活动·${day}%`);
-if (!rows.length) {
-  console.log(JSON.stringify({ day, activities: 0, digest: null }, null, 2));
+const events = dailyEvents(hub,day,{undigestedOnly:true});
+if (!rows.length && !events.length) {
+  console.log(JSON.stringify({ day, activities: 0, daily_events: 0, digest: null }, null, 2));
   process.exit(0);
 }
 
-const lines = rows.map((r) => r.content.replace(/^【活动·[^】]*】/, ''));
+const lines = [...rows.map((r) => r.content.replace(/^【活动·[^】]*】/, '')),...events.map(e=>`[${e.channel}/${e.conversation_kind}/${e.role}] ${e.content??`${e.user_text??''} → ${e.assistant_text??''}`}`)];
 const settings = JSON.parse(readFileSync(join(root, 'runtime/dsh-home/dsh-pet/standalone-ai.json'), 'utf8'));
 const response = await fetch('http://127.0.0.1:3110/v1/chat/completions', {
   method: 'POST',
@@ -46,4 +48,5 @@ const digest = text || `今天一共做了 ${rows.length} 件事：${lines.slice
 
 const record = recordActivity(hub, `【当天记忆·${day}】${digest}`, { channel: 'digest' });
 hub.prepare("UPDATE memories SET kind='daily_digest', confidence=0.9 WHERE id=?").run(record.id);
-console.log(JSON.stringify({ day, activities: rows.length, digest, memoryId: record.id }, null, 2));
+markDailyDigested(hub,day);purgeDailyMemory(hub,30);
+console.log(JSON.stringify({ day, activities: rows.length, daily_events: events.length, digest, memoryId: record.id }, null, 2));

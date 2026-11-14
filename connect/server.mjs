@@ -14,6 +14,9 @@ import { buildFeed } from './messages/feed.mjs';
 import { MESSAGES_PAGE } from './messages/page.mjs';
 import { peer as qqPeer, savePeer as saveQqPeer, peers as qqPeers } from './qq/store.mjs';
 import { LocalVoice } from './voice/local.mjs';
+import { cancelTask, initTasks, listTasks, task } from './tasks.mjs';
+import { CAPABILITY_MATRIX } from './core-contract.mjs';
+import { recordObservation } from './observability.mjs';
 
 export const APPS = Object.freeze({ settings: 'com.android.settings', wechat: 'com.tencent.mm', douyin: 'com.ss.android.ugc.aweme', companion: 'com.dafeiyu.companion' });
 export function loadConnectConfig(root) {
@@ -41,6 +44,7 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     status TEXT NOT NULL, expires_at TEXT NOT NULL, result TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     UPDATE commands SET status='unknown' WHERE status='dispatched';`);
   initInbox(db);
+  initTasks(db);
   db.prepare("DELETE FROM communication_events WHERE created_at < datetime('now','-7 days')").run();
   const ilink = new IlinkGateway({db,root,voiceRoot,client:ilinkClient,ask:askIlink});
   const localVoice = new LocalVoice({ root: voiceRoot ?? join(root, 'voice') });
@@ -69,6 +73,7 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     } catch (error) { qqError = error.message; }
   }
   const sessions = new Map();
+  let lastObservation=0;
   const sendPolicy = id => {
     const ws = sessions.get(id);
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(policy(db, id)));
@@ -82,6 +87,10 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     if (path === '/messages' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); return res.end(MESSAGES_PAGE); }
     if (!equal(req.headers.authorization, `Bearer ${config.adminToken}`)) return json(res, 401, { error: 'unauthorized' });
     if (path === '/messages/feed' && req.method === 'GET') { const params = new URL(req.url, 'http://localhost').searchParams; return json(res, 200, { items: buildFeed(db, Number(params.get('limit') ?? 60)) }); }
+    if (path === '/capabilities' && req.method === 'GET') return json(res,200,{capabilities:CAPABILITY_MATRIX,generated_at:new Date().toISOString()});
+    if (path === '/tasks' && req.method === 'GET') { const params=new URL(req.url,'http://localhost').searchParams; return json(res,200,{tasks:listTasks(db,{status:params.get('status')||undefined,limit:params.get('limit')})}); }
+    if (/^\/tasks\/[A-Za-z0-9_-]{1,100}$/.test(path) && req.method === 'GET') { const row=task(db,path.slice(7)); return json(res,row?200:404,row??{error:'not_found'}); }
+    if (/^\/tasks\/[A-Za-z0-9_-]{1,100}\/cancel$/.test(path) && req.method === 'POST') { const id=path.split('/')[2]; return json(res,200,{ok:cancelTask(db,id)}); }
     if (path.startsWith('/ilink/')) return ilink.admin(req,res,path,body,server.address().port);
     if (path.startsWith('/qq/')) {
       if (!qq) return json(res, 503, { error: qqError ?? 'qq_not_configured' });
@@ -219,6 +228,7 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     db.prepare("DELETE FROM communication_events WHERE created_at < datetime('now','-7 days')").run();
     for (const ws of sessions.values()) if (Date.now() - ws.lastSeen > 45000) ws.terminate();
     db.prepare("UPDATE commands SET status='unknown' WHERE status='dispatched' AND expires_at < ?").run(new Date().toISOString());
+    if(Date.now()-lastObservation>=15*60_000){try{recordObservation(root,{sessions,db,qq,now:Date.now()});}catch{}lastObservation=Date.now();}
   }, 5000);
   timer.unref();
 
@@ -235,14 +245,14 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
       const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { days: [] };
       if ((state.days ?? []).includes(day)) return;
       const { execFile } = await import('node:child_process');
-      await new Promise((resolve) => execFile('node', ['scripts/memory-digest.mjs', '--day', day], { cwd: root }, () => resolve(null)));
-      state.days = [...(state.days ?? []), day].slice(-30);
-      writeFileSync(statePath, JSON.stringify(state, null, 2));
+      const exitCode=await new Promise((resolve) => execFile('node', ['scripts/memory-digest.mjs', '--day', day], { cwd: root }, (_error,_stdout,_stderr)=>resolve(_error?.code??0)));
+      if(exitCode===0){state.days = [...(state.days ?? []), day].slice(-30);writeFileSync(statePath, JSON.stringify(state, null, 2));}
     } catch {}
   }, 10 * 60_000);
   digestTimer.unref();
 
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   qq?.setMessageUrl(`http://127.0.0.1:${server.address().port}/messages?token=${config.adminToken}`);
+  try{recordObservation(root,{sessions,db,qq,now:Date.now()});lastObservation=Date.now();}catch{}
   return { port: server.address().port, config, close: async () => { await qq?.close(); qqMemory?.close(); await ilink.close(); calls.close(); clearInterval(timer); clearInterval(digestTimer); for (const ws of callWss.clients) ws.terminate(); for (const ws of wss.clients) ws.terminate(); callWss.close(); await new Promise(r => wss.close(r)); server.close(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); db.close(); } };
 }

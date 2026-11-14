@@ -16,3 +16,7 @@ standalone-runtime.json
 android/**/.gradle/
 android/**/build/
 android/**/local.properties
+
+# 本地保留、不入库的素材与目标配置
+reverse-*/
+runtime/archive/

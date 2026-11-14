@@ -1,6 +1,8 @@
 import { ingestUpdates, registerAccount, peerHistory } from './store.mjs';
 import { openHub, captureExchange } from '../memory-hub.mjs';
-import { actionMarkerNames, stripActionMarkers, runAction } from '../actions.mjs';
+import { actionMarkerNames, stripActionMarkers } from '../actions.mjs';
+import { proposeTask } from '../tasks.mjs';
+import { recordDailyMessage } from '../daily-memory.mjs';
 
 let hubCache = null;
 function unifiedHub() {
@@ -42,6 +44,7 @@ export class IlinkWorker {
       if(signal.aborted) return;
       let peer=this.allowed(a,row);
       if(!peer) {this.db.prepare("UPDATE ilink_messages SET status='held' WHERE id=?").run(row.id);continue;}
+      try { const hub=unifiedHub(); if(hub&&row.text) recordDailyMessage(hub,{channel:'wechat',conversationKind:'direct',peerId:row.peer_id,inputKind:row.input_kind??'text',role:'user',content:row.text,messageId:row.id,privacyScope:'private',importance:0.7,at:new Date(row.created_ms)}); } catch {}
       if(this.now()-row.created_ms>600000) {this.db.prepare("UPDATE ilink_messages SET status='expired' WHERE id=?").run(row.id);continue;}
       const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(this.now()));
       this.db.prepare('INSERT OR IGNORE INTO ilink_usage(account_id,day) VALUES(?,?)').run(a.id,day);
@@ -87,20 +90,18 @@ export class IlinkWorker {
       peer=this.allowed(a,row);
       if(signal.aborted || !peer || this.now()-row.created_ms>600000) {this.db.prepare("UPDATE ilink_messages SET status='held',error='permission_or_session_changed' WHERE id=?").run(row.id);continue;}
       const actions = actionMarkerNames(reply);
-      if (actions.length) { reply = stripActionMarkers(reply); this.db.prepare("UPDATE ilink_messages SET reply=? WHERE id=?").run(reply, row.id); }
+      if (actions.length) {
+        const intent={intent:'external_action_request',operations:actions,target:'unspecified',requires_confirmation:true};
+        const task=proposeTask(this.db,{kind:'ilink',convId:row.peer_id,sourceMessageId:row.id,intent,proposerPeerId:row.peer_id,origin:'ilink',now:this.now()});
+        reply = `${stripActionMarkers(reply)} 外部操作已记录为待确认任务 ${task.id}，本次没有执行。`;
+        this.db.prepare("UPDATE ilink_messages SET reply=?,error='external_action_not_executed' WHERE id=?").run(reply, row.id);
+      }
       this.db.prepare("UPDATE ilink_messages SET status='sending' WHERE id=?").run(row.id);
       try {
         const result=prepared?await this.voice.send(a,row,prepared,signal):await this.client.send(a,{peerId:row.peer_id,text:reply,contextToken:row.context_token,clientId:row.client_id},signal);
         const unverified=prepared?.kind==='native_voice_unverified';
         this.db.prepare("UPDATE ilink_messages SET status=?,outbound_id=?,context_token=CASE WHEN ? THEN context_token ELSE NULL END,updated_at=datetime('now') WHERE id=?").run(unverified?'awaiting_voice_confirmation':'sent',result.message_id?String(result.message_id):null,unverified?1:0,row.id);
-        try { const hub = unifiedHub(); if (hub && row.text && reply) captureExchange(hub, row.text, reply, { source: 'wechat' }); } catch {}
-        for (const name of actions) {
-          try {
-            const result = await runAction(name, { root: process.cwd() });
-            const note = result.ok ? `办好了：${String(result.text ?? '').slice(0, 120)}` : `这个没办成：${result.error ?? '失败'}`;
-            await this.client.send(a, { peerId: row.peer_id, text: note, contextToken: row.context_token }, signal);
-          } catch {}
-        }
+        try { const hub = unifiedHub(); if (hub && row.text && reply) { recordDailyMessage(hub,{channel:'wechat',conversationKind:'direct',peerId:row.peer_id,inputKind:row.input_kind??'text',role:'assistant',content:reply,messageId:`${row.id}:reply`,privacyScope:'private',importance:0.7,at:new Date()}); captureExchange(hub, row.text, reply, { source: 'wechat' }); } } catch {}
       } catch {
         this.db.prepare("UPDATE ilink_messages SET status='unknown',error='delivery_not_confirmed',updated_at=datetime('now') WHERE id=?").run(row.id);
       }
