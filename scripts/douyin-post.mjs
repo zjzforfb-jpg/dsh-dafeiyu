@@ -59,10 +59,34 @@ const idLine = execFileSync('adb', ['shell', `content query --uri content://medi
 const mediaId = idLine.match(/_id=(\d+)/)?.[1];
 if (!mediaId) throw new Error('mediastore_id_missing');
 
+async function pickMusic(serial) {
+  try {
+    const before = await dumpUi(serial);
+    const btn = before.find((n) => (n.text ?? '').includes('选择音乐'));
+    if (!btn) return 'music_button_missing';
+    await tapPoint(serial, { x: btn.bounds.cx, y: btn.bounds.cy });
+    await sleep(1800);
+    const panel = await dumpUi(serial);
+    const candidates = panel.filter((n) => n.text && /[一-龥]/u.test(n.text) && n.text.length >= 2 && n.text.length <= 12 && !/选择音乐|搜索|热门|收藏|推荐|取消|完成|使用/u.test(n.text));
+    const pick = candidates.find((n) => n.cls.includes('TextView')) ?? candidates[0];
+    if (!pick) { await adbShell(serial, 'input keyevent 4'); return 'music_empty'; }
+    await tapPoint(serial, { x: pick.bounds.cx, y: pick.bounds.cy });
+    await sleep(1200);
+    const after = await dumpUi(serial);
+    const use = after.find((n) => /使用|完成|选好了/u.test(n.text ?? ''));
+    if (use) { await tapPoint(serial, { x: use.bounds.cx, y: use.bounds.cy }); await sleep(900); }
+    else { await adbShell(serial, 'input keyevent 4'); }
+    return `music:${pick.text}`;
+  } catch (error) { return `music_failed:${error.message}`; }
+}
+
 await adbShell(serial, 'am force-stop com.ss.android.ugc.aweme');
 await sleep(900);
 await adbShell(serial, `am start -a android.intent.action.SEND -t image/jpeg -n com.ss.android.ugc.aweme/.share.OpenPlatformShareRealActivity --eu android.intent.extra.STREAM content://media/external/images/media/${mediaId} --grant-read-uri-permission`);
 await sleep(5000);
+const music = await pickMusic(serial);
+console.log(JSON.stringify({ music }));
+await sleep(600);
 await tapPoint(serial, { x: 900, y: 2741 }); // 下一步（图片编辑页）
 await sleep(3200);
 
@@ -90,6 +114,24 @@ try {
     await sleep(1500);
     const opt = (await dumpUi(serial)).find((node) => node.text === '内容由AI生成');
     if (opt) { await tapPoint(serial, { x: opt.bounds.cx, y: opt.bounds.cy }); await sleep(1200); }
+  }
+} catch {}
+
+// 高级设置：确保两个开关为关闭（灰色）
+try {
+  const advNode = (await dumpUi(serial)).find((n) => (n.text ?? '').includes('高级设置'));
+  if (advNode) {
+    await tapPoint(serial, { x: advNode.bounds.cx, y: advNode.bounds.cy });
+    await sleep(1600);
+    for (const label of ['发布后保存至相册', '允许下载']) {
+      const sheet = await dumpUi(serial);
+      const row = sheet.find((n) => (n.text ?? '').includes(label));
+      if (!row) continue;
+      const sw = sheet.find((n) => n.bounds && Math.abs(n.bounds.cy - row.bounds.cy) < 50 && n.bounds.cx > row.bounds.cx + 500 && /Switch|CheckBox|Layout/u.test(n.cls));
+      if (sw && sw.checked) { await tapPoint(serial, { x: sw.bounds.cx, y: sw.bounds.cy }); await sleep(700); }
+    }
+    await adbShell(serial, 'input keyevent 4');
+    await sleep(800);
   }
 } catch {}
 

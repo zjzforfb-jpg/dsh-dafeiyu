@@ -75,10 +75,21 @@ export const ACTIONS = {
   'douyin.publish': {
     label: '发一条图文日常',
     async run({ root }) {
+      const { readFileSync, writeFileSync, existsSync, mkdirSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const stateDir = join(root, 'runtime', 'douyin');
+      const stateFile = join(stateDir, 'publish-state.json');
+      mkdirSync(stateDir, { recursive: true });
+      const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
+      const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : { dates: [] };
+      const countToday = (state.dates ?? []).filter((d) => d === today).length;
+      if (countToday >= 2) return '今天已经发了两条啦，剩下的留到明天，免得刷屏～';
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       const execAsync = promisify(execFile);
       const { stdout } = await execAsync('node', ['scripts/douyin-post.mjs', '--publish'], { cwd: root, timeout: 480_000 });
+      (state.dates ??= []).push(today);
+      writeFileSync(stateFile, JSON.stringify(state, null, 2));
       const tail = String(stdout).trim().split('\n').slice(-6).join(' ');
       return tail.slice(0, 160) || '图文发出去了。';
     },
