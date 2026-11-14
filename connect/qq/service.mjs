@@ -119,14 +119,7 @@ export class QqService {
     const allowed = peer(this.db, kind, id);
     if (!allowed || !allowed.enabled || !allowed.autoReply) { updateMessage(this.db, messageKey, { status: 'held', error: 'peer_not_allowed' }); return { held: true }; }
 
-    // 「挂了/挂断」这类指令直接落到 QQ 通话窗口，不经过模型。
-    if (/(挂断|挂电话|挂了|结束通话|hang\s*up)/iu.test(String(text).trim())) {
-      const done = await this.hangupCall();
-      const reply = done ? '好，挂了。' : '现在没找到正在进行的 QQ 通话窗口。';
-      updateMessage(this.db, messageKey, { status: 'ready', reply });
-      try { await this.api.sendText({ kind, id, content: reply, msgId: messageId }); updateMessage(this.db, messageKey, { status: 'sent' }); } catch {}
-      return { hangup: done };
-    }
+    // 挂断由模型判断（回复里带 [HANGUP]），不做关键词匹配，避免误挂。
 
     if (kind === 'group' && !atMe) {
       // 别人被 @ 的消息不抢答；@全体 只有在提到大肥鱼时才接
@@ -226,6 +219,8 @@ export class QqService {
       updateMessage(this.db, messageKey, { status: 'failed', error: 'model_failed' });
       return { error: 'model_failed' };
     }
+    const wantsHangup = /\[HANGUP\]/i.test(reply);
+    if (wantsHangup) reply = reply.replace(/\[HANGUP\]/giu, '').trim();
     updateMessage(this.db, messageKey, { status: 'ready', reply });
     if (this.memory) {
       try { rememberExchange(this.memory, spoken, reply); } catch {}
@@ -233,6 +228,7 @@ export class QqService {
     }
     this.publish(`qq:${messageKey}:out`, { phase: 'done', message: `大肥鱼：${reply.slice(0, 40)}` });
 
+    if (wantsHangup) { try { await this.hangupCall(); } catch {} }
     const inCall = Boolean(this.calls.active(kind, id));
     const wantVoice = Boolean(this.voice) && (inCall || (inputKind === 'voice' && allowed.voiceReply));
     if (wantVoice) {

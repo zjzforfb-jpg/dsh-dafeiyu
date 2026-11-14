@@ -146,17 +146,6 @@ export class SoundBridge {
       const result = await this.voice.transcribeBytes(id, wav, controller.signal);
       if (!result.text) return;
       this.log(`爸爸说：${result.text}`);
-      // 通话里说「挂了/挂断」：直接点 QQ/微信 通话窗口的挂断键，不再走模型。
-      if (/(挂断|挂电话|挂了|结束通话|hang\s*up)/iu.test(result.text)) {
-        try {
-          const { ensureBinaries } = await import('../macui/index.mjs');
-          const { hangup } = await import('../macui/qq.mjs');
-          const bins = ensureBinaries(process.cwd());
-          const done = await hangup(bins);
-          this.log(done ? '已挂断 QQ 通话。' : '没找到 QQ 通话窗口。');
-        } catch (error) { this.log(`挂断失败：${error.message}`); }
-        return;
-      }
       this.onStatus({ state: 'thinking', text: result.text });
       const reply = await this.ask({ text: result.text, history: this.history.slice(-8), signal: controller.signal });
       if (!reply) return;

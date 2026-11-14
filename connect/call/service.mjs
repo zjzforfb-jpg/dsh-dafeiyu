@@ -26,8 +26,8 @@ export function pcmToWav(pcm16, sampleRate) {
 }
 
 export class CallService {
-  constructor({ voice, ask, log = () => {}, now = () => Date.now(), maxHistory = 16, busyTimeoutMs = 30000 }) {
-    Object.assign(this, { voice, ask, log, now, maxHistory, busyTimeoutMs });
+  constructor({ voice, ask, askStream = null, log = () => {}, now = () => Date.now(), maxHistory = 16, busyTimeoutMs = 30000, onHangup = null }) {
+    Object.assign(this, { voice, ask, askStream, log, now, maxHistory, busyTimeoutMs, onHangup });
     this.sessions = new Map();
     this.pending = new Map();
     this.controllers = new Map();
@@ -86,8 +86,46 @@ export class CallService {
       const text = String(transcript.text ?? '').trim();
       if (!text) throw new Error('voice_not_understood');
       hooks.onTranscript?.(text);
-      const reply = String(await this.ask({ text, history: session.history.slice(-this.maxHistory) })).trim();
+      const history = session.history.slice(-this.maxHistory);
+      // 豆包式流水线：文字一出就按句合成，第一句话先出声，不等整段。
+      if (this.askStream && typeof this.voice.streamSynthesize === 'function') {
+        let spoken = '';
+        let pending = '';
+        let firstAudio = true;
+        try {
+          for await (const delta of this.askStream({ text, history, signal: controller.signal })) {
+            if (controller.signal.aborted) throw new Error('call_cancelled');
+            spoken += delta;
+            pending += delta;
+            const parts = pending.split(/(?<=[。！？!?～~\n])/u);
+            pending = parts.pop() ?? '';
+            for (const sentence of parts) {
+              const clean = sentence.trim();
+              if (!clean) continue;
+              hooks.onReply?.(spoken.replace(/\[HANGUP\]/giu, '').trim());
+              await this.voice.streamSynthesize(audioId + ':' + (firstAudio ? 'a' : Date.now()), clean.replace(/\[HANGUP\]/giu, ''), controller.signal, { onPcm: chunk => hooks.onAudio?.(chunk) });
+              firstAudio = false;
+            }
+          }
+          const tail = pending.trim();
+          if (tail) await this.voice.streamSynthesize(audioId + ':z', tail.replace(/\[HANGUP\]/giu, ''), controller.signal, { onPcm: chunk => hooks.onAudio?.(chunk) });
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
+          throw error;
+        }
+        let reply = spoken.replace(/\[HANGUP\]/giu, '').trim();
+        if (!reply) throw new Error('empty_reply');
+        const wantsHangup = /\[HANGUP\]/i.test(spoken);
+        hooks.onReply?.(reply);
+        session.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
+        session.history = session.history.slice(-this.maxHistory);
+        if (wantsHangup) setTimeout(() => { try { this.onHangup?.(); } catch {} }, 1800);
+        return { transcript: text, reply, streamed: true, pipelined: true };
+      }
+      let reply = String(await this.ask({ text, history })).trim();
       if (!reply) throw new Error('empty_reply');
+      const wantsHangup = /\[HANGUP\]/i.test(reply);
+      if (wantsHangup) reply = reply.replace(/\[HANGUP\]/giu, '').trim();
       hooks.onReply?.(reply);
       let streamed = null;
       if (typeof this.voice.streamSynthesize === 'function') {

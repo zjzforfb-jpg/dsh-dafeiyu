@@ -44,7 +44,19 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
   db.prepare("DELETE FROM communication_events WHERE created_at < datetime('now','-7 days')").run();
   const ilink = new IlinkGateway({db,root,voiceRoot,client:ilinkClient,ask:askIlink});
   const localVoice = new LocalVoice({ root: voiceRoot ?? join(root, 'voice') });
-  const calls = new CallService({ voice: localVoice, ask: askCall ?? (async () => { throw new Error('call_brain_not_configured'); }), log: value => console.error(JSON.stringify(value)) });
+  const calls = new CallService({
+    voice: localVoice,
+    ask: askCall ?? (async () => { throw new Error('call_brain_not_configured'); }),
+    askStream: askCallStream ?? null,
+    log: value => console.error(JSON.stringify(value)),
+    onHangup: async () => {
+      try {
+        const { ensureBinaries } = await import('./macui/index.mjs');
+        const { hangup } = await import('./macui/qq.mjs');
+        await hangup(ensureBinaries(root));
+      } catch (error) { console.error(JSON.stringify({ hangup: false, error: error.message })); }
+    },
+  });
   let qq = null, qqError = null, qqMemory = null;
   if (qqEnabled && home) { try { qqMemory = openQqMemory(home); } catch (error) { qqError = `memory:${error.message}`; } }
   if (qqEnabled) {
