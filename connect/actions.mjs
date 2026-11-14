@@ -42,15 +42,32 @@ export const ACTIONS = {
       const run1 = promisify(execFile);
       await run1('adb', ['shell', 'am', 'start', '-n', 'com.ss.android.ugc.aweme/.splash.SplashActivity'], { timeout: 30_000 });
       await sleep(4000);
+      const { dumpUi } = await import('../device/uia.mjs');
+      const signature = async () => {
+        const nodes = await dumpUi('ARMR023302000316').catch(() => []);
+        const longest = nodes.filter((x) => (x.text ?? '').length > 12).map((x) => x.text.trim()).sort((a, b) => b.length - a.length)[0] ?? '';
+        return longest.slice(0, 40);
+      };
       let watched = 0;
       for (let i = 0; i < n; i += 1) {
         const stay = watchDelayMs();
         await sleep(stay);
         watched += 1;
         if (i === n - 1) break;
-        const [x1, y1, x2, y2, ms] = swipeJitter();
-        await run1('adb', ['shell', 'input', 'swipe', String(x1), String(y1), String(x2), String(y2), String(ms)], { timeout: 20_000 });
-        await sleep(rand0(1200, 2600));
+        const before = await signature();
+        let moved = false;
+        for (let attempt = 0; attempt < 3 && !moved; attempt += 1) {
+          const [x1, y1, x2, y2, ms] = swipeJitter({ y0: 2300 + attempt * 80, y1: 700 - attempt * 60 });
+          await run1('adb', ['shell', 'input', 'swipe', String(x1), String(y1), String(x2), String(y2), String(ms)], { timeout: 20_000 });
+          await sleep(rand0(1400, 2800));
+          moved = (await signature()) !== before;
+        }
+        if (!moved) {
+          await run1('adb', ['shell', 'input', 'keyevent', '4'], { timeout: 10_000 });
+          await sleep(1200);
+          await run1('adb', ['shell', 'input', 'tap', '119', '2730'], { timeout: 10_000 });
+          await sleep(1800);
+        }
       }
       return `看了 ${watched} 条视频，按每条看完的节奏走的。`;
     },

@@ -32,6 +32,14 @@ const home = join(root, 'runtime', 'dsh-home');
 const stateFile = join(root, 'runtime', 'douyin', 'state.json');
 const accountsFile = join(root, 'runtime', 'douyin', 'accounts.json');
 
+function parseLikes(raw) {
+  const text = String(raw ?? '').trim();
+  const m = text.match(/([\d.]+)\s*(万|w|W)?/u);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Math.round(n * (m[2] ? 10000 : 1));
+}
+
 function loadState() {
   try {
     return JSON.parse(readFileSync(stateFile, 'utf8'));
@@ -229,6 +237,50 @@ async function main() {
     const result = await postComment(serial, text);
     if (result.sent) { remember(text, workText ?? account); noteActivity(`在抖音给 ${account} 的作品评论了：${text}`); }
     console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
+    return;
+  }
+
+  if (has('benchmark-round')) {
+    const dryRun = has('dry-run');
+    const keyword = option('keyword', '大肥鱼');
+    const store = loadAccounts(accountsFile);
+    const names = new Set(Object.keys(store.accounts ?? {}));
+    await resetDouyin(serial);
+    await openSearch(serial);
+    await searchKeyword(serial, keyword);
+    const nodes = await dumpUi(serial);
+    const cards = parseSearchCards(nodes)
+      .map((card) => ({ ...card, likes: parseLikes(card.likes) }))
+      .sort((a, b) => b.likes - a.likes);
+    const benchmark = cards.filter((card) => names.has(card.author));
+    const pick = (benchmark.length ? benchmark : cards)[0];
+    if (!pick) { console.log(JSON.stringify({ cards: cards.length, picked: null }, null, 2)); return; }
+    console.log(JSON.stringify({ keyword, cards: cards.length, benchmarkHits: benchmark.length, pick: { title: pick.title.slice(0, 30), author: pick.author, likes: pick.likes } }, null, 2));
+    const { tapPoint: tap, sleep: nap } = await import('../device/uia.mjs');
+    let opened = '';
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await tap(serial, pick.point);
+      await nap(2600);
+      opened = await currentActivity(serial);
+      if (/DetailActivity/u.test(opened)) break;
+    }
+    if (!/DetailActivity/u.test(opened)) { console.log(JSON.stringify({ opened, error: 'detail_not_opened' })); return; }
+    const { watchDelayMs, sleep: humanSleep } = await import('../connect/douyin/humanize.mjs');
+    const watchMs = Number(option('watch-ms', '0')) || watchDelayMs();
+    console.log(JSON.stringify({ watching_ms: watchMs }));
+    await humanSleep(watchMs);
+    const text = await douyinBrain(home)({ caption: pick.title, keyword });
+    const { decision } = gate(text);
+    console.log(JSON.stringify({ drafted: text, level: decision.level, reason: decision.reason }, null, 2));
+    if (!decision.ok || dryRun) return;
+    const result = await postComment(serial, text);
+    if (result.sent) {
+      remember(text, pick.author);
+      noteActivity(`在抖音搜「${keyword}」后给 ${pick.author} 的爆款评论了：${text}`);
+      store.accounts[pick.author] = { ...(store.accounts[pick.author] ?? {}), name: pick.author, lastWork: pick.title, lastLikes: pick.likes, lastSeenAt: Date.now() };
+      saveAccounts(accountsFile, store);
+    }
+    console.log(JSON.stringify({ sent: result.sent }, null, 2));
     return;
   }
 

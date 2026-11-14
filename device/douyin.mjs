@@ -305,7 +305,7 @@ export function parseSearchCards(nodes) {
 /** Open an account profile from the search page (uses 用户 tab). */
 export async function openUserProfile(serial, name) {
   const first = await dumpUi(serial);
-  const tab = first.find((node) => node.text === '用户' && node.clickable);
+  const tab = first.find((node) => node.text === '用户') ?? first.find((node) => (node.text ?? '').includes('用户'));
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!tab) break;
     await tapPoint(serial, { x: tab.bounds.cx, y: tab.bounds.cy });
@@ -318,10 +318,21 @@ export async function openUserProfile(serial, name) {
     const label = users.find((node) => node.text === name && !node.cls.includes('EditText'))
       ?? users.find((node) => node.text?.includes(name) && !node.cls.includes('EditText'));
     if (!label) {
-      // 用户名列表在部分版本是自绘的，dump 里拿不到文字：按卡片几何位置点头像。
-      for (let row = 0; row < 3; row += 1) {
-        await tapPoint(serial, { x: 190, y: 628 + row * 296 });
-        await sleepMs(2800);
+      // 用户列表是自绘卡片：第一张卡片的头像/名字位置（实测 1312×2848：名字 (389,456)、头像 (157,501)）。
+      for (const point of [{ x: 389, y: 456 }, { x: 157, y: 501 }, { x: 500, y: 460 }]) {
+        await tapPoint(serial, point);
+        await sleepMs(3000);
+        const after = await dumpUi(serial);
+        const activity = await currentActivity(serial);
+        if (/UserProfile/u.test(activity) || after.some((node) => /粉丝|获赞|作品|私信|编辑主页/u.test(node.text ?? ''))) return after;
+      }
+      // 再退一步：点第一个可点的整行卡片。
+      const rows = users
+        .filter((node) => node.clickable && node.bounds.w >= 900 && node.bounds.h >= 120)
+        .sort((a, b) => a.bounds.y - b.bounds.y);
+      for (const row of rows.slice(0, 3)) {
+        await tapPoint(serial, { x: row.bounds.cx, y: row.bounds.cy });
+        await sleepMs(3000);
         const after = await dumpUi(serial);
         const activity = await currentActivity(serial);
         if (/UserProfile/u.test(activity) || after.some((node) => /粉丝|获赞|作品|私信|编辑主页/u.test(node.text ?? ''))) return after;
