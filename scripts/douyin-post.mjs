@@ -32,22 +32,17 @@ execFileSync('adb', ['shell', 'mkdir', '-p', '/sdcard/Pictures/DaFeiYu']);
 execFileSync('adb', ['push', post.imageFile, remote], { stdio: 'ignore' });
 execFileSync('adb', ['shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', `file://${remote}`], { stdio: 'ignore' });
 
+// 用分享 intent 把图片直接送进抖音发布流程（比相册选择器稳定）
+const idLine = execFileSync('adb', ['shell', `content query --uri content://media/external/images/media --projection _id:_display_name --where "_display_name LIKE '${remote.split('/').pop()}%'"`], { encoding: 'utf8' });
+const mediaId = idLine.match(/_id=(\d+)/)?.[1];
+if (!mediaId) throw new Error('mediastore_id_missing');
+
 await adbShell(serial, 'am force-stop com.ss.android.ugc.aweme');
-await sleep(800);
-await adbShell(serial, 'monkey -p com.ss.android.ugc.aweme -c android.intent.category.LAUNCHER 1');
-await sleep(4000);
-await tapPoint(serial, { x: 622, y: 2761 }); // 底部「+」
-await sleep(2400);
-await tapPoint(serial, { x: 1050, y: 2362 }); // 相册
-await sleep(2400);
-await tapPoint(serial, { x: 596, y: 110 }); // 「图片」筛选 tab
-await sleep(1400);
-await tapPoint(serial, { x: 200, y: 760 }); // 第一张（最新）
-await sleep(1500);
-await tapPoint(serial, { x: 1050, y: 2722 }); // 下一步
-await sleep(1600);
-await tapPoint(serial, { x: 1050, y: 2722 }); // 下一步（照片预览页）
-await sleep(2600);
+await sleep(900);
+await adbShell(serial, `am start -a android.intent.action.SEND -t image/jpeg -n com.ss.android.ugc.aweme/.share.OpenPlatformShareRealActivity --eu android.intent.extra.STREAM content://media/external/images/media/${mediaId} --grant-read-uri-permission`);
+await sleep(5000);
+await tapPoint(serial, { x: 900, y: 2741 }); // 下一步（图片编辑页）
+await sleep(3200);
 
 // 填文案
 await tapPoint(serial, { x: 238, y: 1305 });
