@@ -1,5 +1,6 @@
 import { ingestUpdates, registerAccount, peerHistory } from './store.mjs';
 import { openHub, captureExchange } from '../memory-hub.mjs';
+import { actionMarkerNames, stripActionMarkers, runAction } from '../actions.mjs';
 
 let hubCache = null;
 function unifiedHub() {
@@ -85,12 +86,21 @@ export class IlinkWorker {
       }
       peer=this.allowed(a,row);
       if(signal.aborted || !peer || this.now()-row.created_ms>600000) {this.db.prepare("UPDATE ilink_messages SET status='held',error='permission_or_session_changed' WHERE id=?").run(row.id);continue;}
+      const actions = actionMarkerNames(reply);
+      if (actions.length) { reply = stripActionMarkers(reply); this.db.prepare("UPDATE ilink_messages SET reply=? WHERE id=?").run(reply, row.id); }
       this.db.prepare("UPDATE ilink_messages SET status='sending' WHERE id=?").run(row.id);
       try {
         const result=prepared?await this.voice.send(a,row,prepared,signal):await this.client.send(a,{peerId:row.peer_id,text:reply,contextToken:row.context_token,clientId:row.client_id},signal);
         const unverified=prepared?.kind==='native_voice_unverified';
         this.db.prepare("UPDATE ilink_messages SET status=?,outbound_id=?,context_token=CASE WHEN ? THEN context_token ELSE NULL END,updated_at=datetime('now') WHERE id=?").run(unverified?'awaiting_voice_confirmation':'sent',result.message_id?String(result.message_id):null,unverified?1:0,row.id);
         try { const hub = unifiedHub(); if (hub && row.text && reply) captureExchange(hub, row.text, reply, { source: 'wechat' }); } catch {}
+        for (const name of actions) {
+          try {
+            const result = await runAction(name, { root: process.cwd() });
+            const note = result.ok ? `办好了：${String(result.text ?? '').slice(0, 120)}` : `这个没办成：${result.error ?? '失败'}`;
+            await this.client.send(a, { peerId: row.peer_id, text: note, contextToken: row.context_token }, signal);
+          } catch {}
+        }
       } catch {
         this.db.prepare("UPDATE ilink_messages SET status='unknown',error='delivery_not_confirmed',updated_at=datetime('now') WHERE id=?").run(row.id);
       }

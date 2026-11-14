@@ -221,7 +221,28 @@ export async function startConnect({ root, port = 8765, config = loadConnectConf
     db.prepare("UPDATE commands SET status='unknown' WHERE status='dispatched' AND expires_at < ?").run(new Date().toISOString());
   }, 5000);
   timer.unref();
+
+  // 每天凌晨 1–2 点整理前一天的记忆（写一条「当天记忆」进长期记忆库）
+  const digestTimer = setInterval(async () => {
+    try {
+      const now = new Date();
+      const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hour12: false }).format(now));
+      if (hour < 1 || hour > 2) return;
+      const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const statePath = join(root, 'runtime', 'connect', 'memory-digest.json');
+      const day = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date(now.getTime() - 86_400_000));
+      const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { days: [] };
+      if ((state.days ?? []).includes(day)) return;
+      const { execFile } = await import('node:child_process');
+      await new Promise((resolve) => execFile('node', ['scripts/memory-digest.mjs', '--day', day], { cwd: root }, () => resolve(null)));
+      state.days = [...(state.days ?? []), day].slice(-30);
+      writeFileSync(statePath, JSON.stringify(state, null, 2));
+    } catch {}
+  }, 10 * 60_000);
+  digestTimer.unref();
+
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   qq?.setMessageUrl(`http://127.0.0.1:${server.address().port}/messages?token=${config.adminToken}`);
-  return { port: server.address().port, config, close: async () => { await qq?.close(); qqMemory?.close(); await ilink.close(); calls.close(); clearInterval(timer); for (const ws of callWss.clients) ws.terminate(); for (const ws of wss.clients) ws.terminate(); callWss.close(); await new Promise(r => wss.close(r)); server.close(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); db.close(); } };
+  return { port: server.address().port, config, close: async () => { await qq?.close(); qqMemory?.close(); await ilink.close(); calls.close(); clearInterval(timer); clearInterval(digestTimer); for (const ws of callWss.clients) ws.terminate(); for (const ws of wss.clients) ws.terminate(); callWss.close(); await new Promise(r => wss.close(r)); server.close(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); db.close(); } };
 }

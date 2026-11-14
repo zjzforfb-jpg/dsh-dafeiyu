@@ -123,9 +123,13 @@ export class QqService {
 
     // 挂断由模型判断（回复里带 [HANGUP]），不做关键词匹配，避免误挂。
 
+    if (kind === 'group' && mentionOthers) {
+      // 只要这条消息里 @ 了别人，就不插嘴（哪怕同时也 @ 了我）
+      updateMessage(this.db, messageKey, { status: 'ignored', error: 'addressed_to_others' });
+      return { ignored: 'addressed_to_others' };
+    }
     if (kind === 'group' && !atMe) {
-      // 别人被 @ 的消息不抢答；@全体 只有在提到大肥鱼时才接
-      if (mentionOthers) { updateMessage(this.db, messageKey, { status: 'ignored', error: 'addressed_to_others' }); return { ignored: 'addressed_to_others' }; }
+      // @全体 只有在提到大肥鱼时才接
       if (mentionAll && !/大肥鱼|肥鱼|鱼鱼/u.test(text)) { updateMessage(this.db, messageKey, { status: 'ignored', error: 'mention_all_skip' }); return { ignored: 'mention_all_skip' }; }
       if (!this.shouldJoinAmbient(kind, id, text)) {
         updateMessage(this.db, messageKey, { status: 'ignored', error: 'ambient_skip' });

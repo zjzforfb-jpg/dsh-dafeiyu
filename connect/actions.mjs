@@ -129,10 +129,23 @@ export function stripActionMarkers(text) {
 export async function runAction(name, { root, args } = {}) {
   const action = ACTIONS[name];
   if (!action) return { ok: false, error: `unknown_action:${name}` };
+  const started = Date.now();
   try {
     const text = await action.run({ root, args });
+    record(name, action, true, text, Date.now() - started, root);
     return { ok: true, text };
   } catch (error) {
-    return { ok: false, error: String(error?.message ?? error).slice(0, 160) };
+    const message = String(error?.message ?? error).slice(0, 160);
+    record(name, action, false, message, Date.now() - started, root);
+    return { ok: false, error: message };
   }
+}
+
+function record(name, action, ok, detail, ms, root) {
+  try {
+    const hub = openHub(root ?? process.cwd());
+    if (!hub) return;
+    const line = ok ? `执行「${action.label ?? name}」完成${detail ? `：${String(detail).slice(0, 80)}` : ''}` : `执行「${action.label ?? name}」失败：${String(detail).slice(0, 80)}`;
+    recordActivity(hub, line, { channel: 'action' });
+  } catch {}
 }

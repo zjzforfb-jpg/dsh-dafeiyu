@@ -22,7 +22,7 @@ function normalize(dispatch) {
       timestamp: d.timestamp ?? null,
       atMe,
       // 这条消息 @ 的是别人，不是冲着大肥鱼来的
-      mentionOthers: !atMe && !mentionAll && others.length > 0,
+      mentionOthers: others.length > 0,
       mentionAll,
     };
   }
