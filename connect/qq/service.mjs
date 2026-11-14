@@ -4,6 +4,7 @@ import { publishDesktopActivity } from '../../desktop/activity.mjs';
 import { CallSessions } from './call.mjs';
 import { isVoiceAttachment, QqGateway } from './gateway.mjs';
 import { formatMemoryList, listMemories, memoryNotes, rememberExchange, rememberText } from './memory.mjs';
+import { captureExchange } from '../memory-hub.mjs';
 import { conversationHistory, dayKey, groupTranscript, initQq, logInbound, memberLabel, messageRow, peer, peers, recentMessages, reserve, savePeer, updateMessage, usage } from './store.mjs';
 
 const MAX_DOWNLOAD = 10 * 1024 * 1024;
@@ -201,7 +202,10 @@ export class QqService {
       return { error: 'model_failed' };
     }
     updateMessage(this.db, messageKey, { status: 'ready', reply });
-    if (this.memory) { try { rememberExchange(this.memory, spoken, reply); } catch {} }
+    if (this.memory) {
+      try { rememberExchange(this.memory, spoken, reply); } catch {}
+      try { captureExchange(this.memory, spoken, reply, { source: kind === 'group' ? 'qq_group' : 'qq' }); } catch {}
+    }
     this.publish(`qq:${messageKey}:out`, { phase: 'done', message: `大肥鱼：${reply.slice(0, 40)}` });
 
     const inCall = Boolean(this.calls.active(kind, id));

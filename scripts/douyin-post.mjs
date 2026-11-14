@@ -10,6 +10,7 @@ import { deviceSerial } from '../device/wechat.mjs';
 import { dumpUi, sleep, tapPoint } from '../device/uia.mjs';
 import { withAdbKeyboard, inputText, adbShell } from '../device/uia.mjs';
 import { composePost } from '../connect/douyin/poster.mjs';
+import { openHub, recordActivity } from '../connect/memory-hub.mjs';
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -62,4 +63,12 @@ if (!has('publish')) {
 await tapPoint(serial, { x: publish.bounds.cx, y: publish.bounds.cy });
 await sleep(4000);
 const after = await dumpUi(serial);
-console.log(JSON.stringify({ status: 'published', visible: after.some((node) => node.text.includes(post.caption.slice(0, 6))) }, null, 2));
+const visible = after.some((node) => node.text.includes(post.caption.slice(0, 6)));
+try {
+  const hub = openHub(root);
+  recordActivity(hub, `在抖音发布了图文作品《${post.title ?? post.caption.slice(0, 20)}》`, { channel: 'douyin' });
+  hub.close();
+} catch (error) {
+  console.error(`活动记忆写入失败：${error.message}`);
+}
+console.log(JSON.stringify({ status: 'published', visible }, null, 2));

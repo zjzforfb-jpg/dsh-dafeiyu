@@ -109,7 +109,10 @@ export async function postComment(serial, text, { dryRun = false } = {}) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await sleepMs(1200);
     const after = await dumpUi(serial);
-    if (after.some((node) => node.text.includes(text.slice(0, 6)))) return { sent: true };
+    const stillTyping = after.some((node) => node.cls.includes('EditText') && node.text?.includes(text.slice(0, 6)));
+    const composerGone = !after.some((node) => node.text === '发送');
+    if (after.some((node) => node.text?.includes(text.slice(0, 6))) && !stillTyping) return { sent: true };
+    if (composerGone && !stillTyping) return { sent: true, verified: 'composer_closed' };
   }
   return { sent: false };
 }
@@ -189,9 +192,17 @@ export async function searchKeyword(serial, keyword, { videoTab = true } = {}) {
   await adbShell(serial, 'input keyevent 123');
   await adbShell(serial, 'input keyevent ' + Array.from({ length: 40 }, () => 67).join(' '));
   await withAdbKeyboard(serial, async () => inputText(serial, keyword));
-  await sleepMs(600);
-  await adbShell(serial, 'input keyevent 66');
-  await sleepMs(2600);
+  await sleepMs(700);
+  // 提交搜索：优先点「搜索」按钮，回车在 ADBKeyboard 下不一定触发。
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const shot = await dumpUi(serial);
+    const submit = shot.find((node) => node.text === '搜索' && node.clickable);
+    if (submit) await tapPoint(serial, { x: submit.bounds.cx, y: submit.bounds.cy });
+    else await adbShell(serial, 'input keyevent 66');
+    await sleepMs(2800);
+    const check = await dumpUi(serial);
+    if (check.some((node) => node.text === '综合' && node.clickable)) break;
+  }
   if (videoTab) {
     const nodes = await dumpUi(serial);
     const tab = nodes.find((node) => node.text === '视频' && node.clickable);
@@ -293,18 +304,45 @@ export function parseSearchCards(nodes) {
 
 /** Open an account profile from the search page (uses 用户 tab). */
 export async function openUserProfile(serial, name) {
-  const nodes = await dumpUi(serial);
-  const tab = nodes.find((node) => node.text === '用户' && node.clickable);
-  if (tab) {
+  const first = await dumpUi(serial);
+  const tab = first.find((node) => node.text === '用户' && node.clickable);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!tab) break;
     await tapPoint(serial, { x: tab.bounds.cx, y: tab.bounds.cy });
-    await sleepMs(2200);
+    await sleepMs(2600);
+    const check = await dumpUi(serial);
+    if (check.some((node) => /粉丝指数|抖音号/u.test(node.text ?? ''))) break;
   }
-  const users = await dumpUi(serial);
-  const row = users.find((node) => node.text === name || node.text?.includes(name));
-  if (!row) throw new Error(`user_not_found:${name}`);
-  await tapPoint(serial, { x: row.bounds.cx, y: row.bounds.cy });
-  await sleepMs(2600);
-  return dumpUi(serial);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const users = await dumpUi(serial);
+    const label = users.find((node) => node.text === name && !node.cls.includes('EditText'))
+      ?? users.find((node) => node.text?.includes(name) && !node.cls.includes('EditText'));
+    if (!label) {
+      // 用户名列表在部分版本是自绘的，dump 里拿不到文字：按卡片几何位置点头像。
+      for (let row = 0; row < 3; row += 1) {
+        await tapPoint(serial, { x: 190, y: 628 + row * 296 });
+        await sleepMs(2800);
+        const after = await dumpUi(serial);
+        const activity = await currentActivity(serial);
+        if (/UserProfile/u.test(activity) || after.some((node) => /粉丝|获赞|作品|私信|编辑主页/u.test(node.text ?? ''))) return after;
+      }
+      throw new Error(`user_not_found:${name}`);
+    }
+    // 用户名是自绘文字但通常可点；点不到时退回头像位置。
+    const points = [
+      { x: label.bounds.cx, y: label.bounds.cy },
+      { x: Math.max(80, label.bounds.x - 70), y: label.bounds.cy },
+      { x: label.bounds.x - 70, y: label.bounds.cy - 40 },
+    ];
+    for (const point of points) {
+      await tapPoint(serial, point);
+      await sleepMs(2800);
+      const after = await dumpUi(serial);
+      const activity = await currentActivity(serial);
+      if (/UserProfile/u.test(activity) || after.some((node) => /粉丝|获赞|作品|私信|编辑主页/u.test(node.text ?? ''))) return after;
+    }
+  }
+  throw new Error('user_profile_not_opened');
 }
 
 /** Recent works on a profile page: titles shown on the grid. */
@@ -330,6 +368,8 @@ export async function sendInCurrentComposer(serial, text, { dryRun = false } = {
   if (!input) throw new Error('composer_not_found');
   await tapPoint(serial, { x: input.bounds.cx, y: input.bounds.cy });
   await sleepMs(1000);
+  await adbShell(serial, 'am broadcast -a ADB_CLEAR_TEXT');
+  await sleepMs(400);
   await withAdbKeyboard(serial, async () => inputText(serial, text));
   await sleepMs(700);
   let after = await dumpUi(serial);

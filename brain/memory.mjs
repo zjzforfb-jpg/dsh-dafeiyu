@@ -46,6 +46,12 @@ export function recall(db, question, limit = 5) {
   });
   scored.sort((a, b) => b.score - a.score || b.id - a.id);
   const relevant = scored.filter((row) => row.score > 0).slice(0, limit);
+  if (/今天|今日|刚才|刚刚|干了什么|做了什么|忙了啥/u.test(question)) {
+    const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    const activities = db.prepare("SELECT id, content, kind, source, confidence, created_at FROM memories WHERE kind = 'activity' AND active = 1 AND content LIKE ? ORDER BY id DESC LIMIT 8")
+      .all(`【活动·${stamp}】%`).reverse();
+    if (activities.length) return [...activities, ...relevant].slice(0, activities.length + limit);
+  }
   if (relevant.length > 0) return relevant;
   if (/记得|记住|以前|之前|关于我/u.test(question)) return scored.slice(0, limit);
   return [];

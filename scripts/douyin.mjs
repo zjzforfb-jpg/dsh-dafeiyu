@@ -19,6 +19,7 @@ import {
   readInteractions, parseInteractions, openInteraction,
 } from '../device/douyin.mjs';
 import { dumpUi } from '../device/uia.mjs';
+import { openHub, recordActivity } from '../connect/memory-hub.mjs';
 import { checkComment, describeRules, LIMITS } from '../connect/douyin/compliance.mjs';
 import { loadAccounts, saveAccounts, upsertAccounts } from '../connect/douyin/accounts.mjs';
 import { douyinBrain } from '../connect/douyin/brain.mjs';
@@ -55,6 +56,14 @@ function gate(text) {
     now,
   });
   return { decision, state, history };
+}
+
+function noteActivity(text) {
+  try {
+    const hub = openHub(process.cwd());
+    recordActivity(hub, text, { channel: 'douyin' });
+    hub.close();
+  } catch {}
 }
 
 function remember(text, video) {
@@ -103,7 +112,7 @@ async function main() {
     }
     await openCommentsSmart(serial);
     const result = await postComment(serial, comment, { dryRun: has('dry-run') });
-    if (result.sent) remember(comment, option('video'));
+    if (result.sent) { remember(comment, option('video')); noteActivity(`在抖音评论了：${comment}`); }
     console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
     return;
   }
@@ -119,7 +128,7 @@ async function main() {
     }
     await openCommentsSmart(serial);
     const result = await replyToComment(serial, { match, reply, dryRun: has('dry-run') });
-    if (result.sent) remember(reply, match);
+    if (result.sent) { remember(reply, match); noteActivity(`在抖音回复了评论：${reply}`); }
     console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
     return;
   }
@@ -192,7 +201,6 @@ async function main() {
       if (/DetailActivity/u.test(opened)) break;
     }
     if (!/DetailActivity/u.test(opened)) throw new Error(`detail_not_opened:${opened}`);
-    await openCommentsSmart(serial);
     let text = option('text');
     if (!text) {
       if (!has('generate')) throw new Error('need_text_or_generate');
@@ -202,7 +210,7 @@ async function main() {
     console.log(JSON.stringify({ account, drafted: text, level: decision.level, reason: decision.reason }, null, 2));
     if (!decision.ok || has('dry-run')) return;
     const result = await postComment(serial, text);
-    if (result.sent) remember(text, workText ?? account);
+    if (result.sent) { remember(text, workText ?? account); noteActivity(`在抖音给 ${account} 的作品评论了：${text}`); }
     console.log(JSON.stringify({ ...result, compliance: decision.level }, null, 2));
     return;
   }

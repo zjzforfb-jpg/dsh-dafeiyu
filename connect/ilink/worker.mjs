@@ -1,4 +1,12 @@
 import { ingestUpdates, registerAccount, peerHistory } from './store.mjs';
+import { openHub, captureExchange } from '../memory-hub.mjs';
+
+let hubCache = null;
+function unifiedHub() {
+  if (hubCache) return hubCache;
+  try { hubCache = openHub(process.cwd()); } catch { hubCache = null; }
+  return hubCache;
+}
 export class IlinkWorker {
   constructor({ db, accounts, client, ask, voice, now = () => Date.now() }) { Object.assign(this,{db,accounts,client,ask,voice,now}); this.jobs = new Map(); this.stopped=false; }
   start() { this.reconcile(); this.timer=setInterval(()=>this.reconcile(),2000); this.timer.unref(); }
@@ -82,6 +90,7 @@ export class IlinkWorker {
         const result=prepared?await this.voice.send(a,row,prepared,signal):await this.client.send(a,{peerId:row.peer_id,text:reply,contextToken:row.context_token,clientId:row.client_id},signal);
         const unverified=prepared?.kind==='native_voice_unverified';
         this.db.prepare("UPDATE ilink_messages SET status=?,outbound_id=?,context_token=CASE WHEN ? THEN context_token ELSE NULL END,updated_at=datetime('now') WHERE id=?").run(unverified?'awaiting_voice_confirmation':'sent',result.message_id?String(result.message_id):null,unverified?1:0,row.id);
+        try { const hub = unifiedHub(); if (hub && row.text && reply) captureExchange(hub, row.text, reply, { source: 'wechat' }); } catch {}
       } catch {
         this.db.prepare("UPDATE ilink_messages SET status='unknown',error='delivery_not_confirmed',updated_at=datetime('now') WHERE id=?").run(row.id);
       }
