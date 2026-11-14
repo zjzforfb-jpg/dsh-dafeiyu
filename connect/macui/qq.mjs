@@ -15,6 +15,8 @@ export const QQ_LAYOUT = {
   chatRowStep: 58,
   callIcon: { x: 738, y: 65 },
   hangup: { x: 295, y: 495 },
+  // Incoming call window: green accept on the left, red reject on the right.
+  accept: { x: 110, y: 495 },
 };
 
 export function chatRowPoint(bounds, row) {
@@ -27,6 +29,10 @@ export function searchBoxPoint(bounds) {
 
 export function callIconPoint(bounds) {
   return { x: bounds.x + QQ_LAYOUT.callIcon.x, y: bounds.y + QQ_LAYOUT.callIcon.y };
+}
+
+export function acceptPoint(bounds) {
+  return { x: bounds.x + QQ_LAYOUT.accept.x, y: bounds.y + QQ_LAYOUT.accept.y };
 }
 
 export function hangupPoint(bounds) {
@@ -88,6 +94,16 @@ export async function hangup(bins) {
   click(bins, point.x, point.y);
   await sleep(1200);
   return true;
+}
+
+/** Click the green accept button on an incoming call window. */
+export async function acceptIncoming(bins) {
+  const call = findCallWindow(listWindows(bins, QQ_LAYOUT.owner));
+  if (!call) return null;
+  const point = acceptPoint(call);
+  click(bins, point.x, point.y);
+  await sleep(1200);
+  return call;
 }
 
 export async function waitCallEnd(bins, timeoutMs = 30 * 60_000) {

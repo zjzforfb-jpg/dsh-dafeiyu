@@ -78,6 +78,8 @@ export class LocalVoice {
     let bytes=0;
     ff.stdout.on('data',chunk=>{bytes+=chunk.length;onPcm(chunk);});
     const done=new Promise((resolve,reject)=>{ff.on('error',reject);ff.on('close',code=>code===0?resolve():reject(new Error(signal?.aborted?'voice_cancelled':'voice_process_failed')));});
+    // An aborted turn rejects `done` before it is awaited; keep it from bubbling up as unhandled.
+    done.catch(()=>{});
     const kill=()=>{try{ff.kill('SIGKILL');}catch{}};
     signal?.addEventListener('abort',kill,{once:true});
     try{

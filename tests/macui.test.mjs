@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { QQ_LAYOUT, chatRowPoint, callIconPoint, hangupPoint, findMainWindow, findCallWindow } from '../connect/macui/qq.mjs';
+import {
+  QQ_LAYOUT,
+  acceptPoint,
+  callIconPoint,
+  chatRowPoint,
+  findCallWindow,
+  findMainWindow,
+  hangupPoint,
+} from '../connect/macui/qq.mjs';
 
 test('QQ chat rows map to stable global points', () => {
   const bounds = { x: 1541, y: 219 };
@@ -12,6 +20,10 @@ test('QQ call and hangup points follow the window origin', () => {
   const bounds = { x: 1541, y: 219 };
   assert.deepEqual(callIconPoint(bounds), { x: 2279, y: 284 });
   assert.deepEqual(hangupPoint({ x: 1946, y: 284 }), { x: 2241, y: 779 });
+});
+
+test('incoming call accept button sits on the left of the call window', () => {
+  assert.deepEqual(acceptPoint({ x: 1946, y: 284 }), { x: 2056, y: 779 });
 });
 
 test('window lookup separates the main window from a call window', () => {
