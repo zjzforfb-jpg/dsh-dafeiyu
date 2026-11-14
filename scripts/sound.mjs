@@ -160,7 +160,7 @@ function usage() {
   扬声器 = BlackHole 16ch（不要选 DAW 多声道，2 路输出采不到）`);
 }
 
-async function callMode({ startNow = false, oneShot = false } = {}) {
+async function callMode({ startNow = false, oneShot = false, keep = false } = {}) {
   const callWatch = ensureCallWatch();
   let bridge = null;
   let enabled = false;
@@ -193,6 +193,10 @@ async function callMode({ startNow = false, oneShot = false } = {}) {
     log: (line) => console.log(`[watch] ${line}`),
     onStart: enter,
     onEnd: async () => {
+      if (keep) {
+        console.log('通话结束；--keep 模式保持通话配置，等待下一通。');
+        return;
+      }
       await leave();
       if (oneShot) {
         watcher.stop();
@@ -264,7 +268,7 @@ async function main() {
   if (args.includes('--status') || args.includes('--check')) return status();
   if (args.includes('--enable')) return enable();
   if (args.includes('--restore')) return restore();
-  if (args.includes('--call')) return callMode({ startNow: true, oneShot: true });
+  if (args.includes('--call')) return callMode({ startNow: true, oneShot: true, keep: args.includes('--keep') });
   if (args.includes('--watch')) return callMode({ startNow: false });
   if (args.includes('--invite')) {
     const index = args.indexOf('--invite');

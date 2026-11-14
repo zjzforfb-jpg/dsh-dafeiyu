@@ -18,6 +18,9 @@ export function createVad({
   sampleRate = 16000,
   frameMs = DEFAULT_FRAME_MS,
   threshold = 0.015,
+  adaptive = false,
+  floorFactor = 5,
+  floorMin = 0.0015,
   silenceMs = 700,
   minMs = 350,
   maxMs = 12000,
@@ -29,6 +32,7 @@ export function createVad({
   const silenceFrames = Math.max(1, Math.round(silenceMs / frameMs));
   const minFrames = Math.max(1, Math.round(minMs / frameMs));
   const maxFrames = Math.max(minFrames + 1, Math.round(maxMs / frameMs));
+  let floor = floorMin;
   let rest = Buffer.alloc(0);
   let frames = [];
   let voiced = 0;
@@ -53,7 +57,9 @@ export function createVad({
 
   function pushFrame(frame) {
     const rms = frameRms(frame);
-    if (rms > threshold) {
+    const limit = adaptive ? Math.max(floor * floorFactor, floorMin) : threshold;
+    if (!speaking) floor = floor * 0.98 + Math.min(rms, 0.05) * 0.02;
+    if (rms > limit) {
       if (!speaking) {
         speaking = true;
         frames = [];

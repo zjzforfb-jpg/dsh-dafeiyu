@@ -50,7 +50,8 @@
     "connect:call": "node scripts/call.mjs",
     "connect:qq-bind": "node scripts/qq-bind.mjs",
     "connect:messages": "node scripts/messages.mjs",
-    "connect:sound": "node scripts/sound.mjs"
+    "connect:sound": "node scripts/sound.mjs",
+    "connect:qq-call": "node scripts/qq-call.mjs"
   },
   "dependencies": {
     "@tencent-connect/qqbot-connector": "^1.2.0",

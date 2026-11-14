@@ -76,6 +76,8 @@ export class SoundBridge {
     });
     this.vad = createVad({
       threshold: Number(process.env.SOUND_VAD_THRESHOLD ?? '') || undefined,
+      adaptive: process.env.SOUND_VAD_ADAPTIVE !== '0',
+      floorMin: Number(process.env.SOUND_VAD_FLOOR ?? '') || undefined,
       onUtterance: (pcm) => this.#enqueue(pcm),
       onSpeechStart: () => {
         if (this.speaking) this.#cancel();
