@@ -31,7 +31,7 @@
   <button id="toggle">开始通话</button>
   <div id="meter"><i></i></div>
   <div id="log"></div>
-  <div class="hint">半双工：我说话时先别讲，等语音条播完再继续。识别在 Mac 本地完成，音频不会上传到第三方 ASR。</div>
+  <div class="hint">全双工：我说话时你也可以直接插话，我一听到就停。识别在 Mac 本地完成，音频不会上传到第三方 ASR。</div>
 </main>
 <script>
 const token = new URLSearchParams(location.search).get('token') ?? '';
@@ -47,6 +47,7 @@ const MAX_MS = 12000;
 
 let socket, ctx, stream, proc, running = false, busy = false;
 let speaking = false, speechStart = 0, lastVoice = 0;
+let audioCtx = null, playSources = [], playUntil = 0, botSpeaking = false, pending = null;
 const frames = [];
 
 function setStatus(text) { statusEl.textContent = text; }
@@ -86,13 +87,47 @@ function toPcm16(float32) {
   }
   return out;
 }
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function playPcm(encoded, sampleRate) {
+  const ac = ensureAudio();
+  const bin = atob(encoded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length >> 1);
+  const buffer = ac.createBuffer(1, pcm.length, sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 32768;
+  const source = ac.createBufferSource();
+  source.buffer = buffer;
+  source.connect(ac.destination);
+  const now = ac.currentTime;
+  if (playUntil < now) playUntil = now + 0.05;
+  source.start(playUntil);
+  playUntil += buffer.duration;
+  playSources.push(source);
+  botSpeaking = true;
+  source.onended = () => {
+    playSources = playSources.filter(item => item !== source);
+    if (!playSources.length) botSpeaking = false;
+  };
+}
+function stopPlayback() {
+  for (const source of playSources) { try { source.stop(); } catch {} }
+  playSources = []; playUntil = 0; botSpeaking = false;
+}
 function sendSegment(float32, sampleRate) {
-  if (!socket || socket.readyState !== 1 || busy) return;
+  if (!socket || socket.readyState !== 1) return;
   const pcm = toPcm16(downsample(float32, sampleRate, SAMPLE_RATE));
   if (pcm.length < SAMPLE_RATE * MIN_MS / 1000) return;
   busy = true;
+  const message = JSON.stringify({ type: 'audio', sampleRate: SAMPLE_RATE, data: b64(pcm) });
+  pending = message;
+  socket.send(message);
   setStatus('听到了，正在转写…');
-  socket.send(JSON.stringify({ type: 'audio', sampleRate: SAMPLE_RATE, data: b64(pcm) }));
 }
 function connect() {
   socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/call/ws?token=${encodeURIComponent(token)}`);
@@ -102,7 +137,9 @@ function connect() {
     let value;
     try { value = JSON.parse(event.data); } catch { return; }
     if (value.type === 'transcript') { addRow('你', value.text, 'me'); setStatus('大肥鱼在想…'); }
-    else if (value.type === 'reply_text') { addRow('大肥鱼', value.text, 'bot'); setStatus('正在合成语音…'); }
+    else if (value.type === 'reply_text') { addRow('大肥鱼', value.text, 'bot'); setStatus('大肥鱼在说…'); }
+    else if (value.type === 'audio_chunk') { ensureAudio(); playPcm(value.data, value.sampleRate || 24000); }
+    else if (value.type === 'reply_end') { pending = null; busy = false; if (!value.cancelled) setStatus('你说吧。'); }
     else if (value.type === 'reply') {
       addRow('大肥鱼', value.text, 'bot');
       if (value.audio) {
@@ -112,9 +149,15 @@ function connect() {
         audio.play().catch(() => { busy = false; setStatus('点一下页面允许播放声音。'); });
       } else { busy = false; setStatus('你说吧。'); }
     } else if (value.type === 'error') {
+      if (value.error === 'call_busy' && pending) {
+        setStatus('我还在说上一句…');
+        const message = pending;
+        setTimeout(() => { if (socket?.readyState === 1) socket.send(message); }, 400);
+        return;
+      }
       busy = false;
-      if (value.error === 'call_busy') setStatus('我还在说上一句，等我一下。');
-      else if (value.error === 'voice_not_understood') setStatus('没听清，再说一次？');
+      if (value.error === 'voice_not_understood') setStatus('没听清，再说一次？');
+      else if (value.error === 'cancelled') setStatus('好，我听着。');
       else setStatus(`出错了：${value.error}`);
     }
   };
@@ -123,16 +166,25 @@ function connect() {
 async function startLocal() {
   stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   ctx = new AudioContext();
+  ensureAudio();
   const source = ctx.createMediaStreamSource(stream);
   proc = ctx.createScriptProcessor(4096, 1, 1);
   proc.onaudioprocess = event => {
-    if (!running || busy) { frames.length = 0; speaking = false; return; }
+    if (!running) { frames.length = 0; speaking = false; return; }
     const input = event.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < input.length; i += 1) sum += input[i] * input[i];
     const rms = Math.sqrt(sum / input.length);
     meter.style.width = Math.min(100, Math.round(rms * 900)) + '%';
     const now = performance.now();
+    if (botSpeaking && rms > SPEECH_THRESHOLD * 1.6) {
+      socket?.send(JSON.stringify({ type: 'cancel' }));
+      stopPlayback();
+      busy = false;
+      pending = null;
+      setStatus('好，我听着。');
+    }
+    if (busy && !botSpeaking) { frames.length = 0; speaking = false; return; }
     if (rms > SPEECH_THRESHOLD) {
       if (!speaking) { speaking = true; speechStart = now; frames.length = 0; }
       lastVoice = now;
@@ -164,11 +216,13 @@ async function startLocal() {
   proc.connect(ctx.destination);
 }
 function stopLocal() {
-  running = false; busy = false; speaking = false; frames.length = 0;
+  running = false; busy = false; speaking = false; frames.length = 0; pending = null;
+  stopPlayback();
   try { proc?.disconnect(); } catch {}
   try { stream?.getTracks().forEach(track => track.stop()); } catch {}
   try { ctx?.close(); } catch {}
-  proc = stream = ctx = undefined;
+  try { audioCtx?.close(); } catch {}
+  proc = stream = ctx = undefined; audioCtx = null;
   meter.style.width = '0';
   toggle.textContent = '开始通话';
   toggle.classList.remove('live');
@@ -177,6 +231,7 @@ toggle.onclick = async () => {
   if (running) { running = false; socket?.close(); stopLocal(); setStatus('已结束'); return; }
   try {
     running = true; busy = false;
+    ensureAudio();
     await startLocal();
     connect();
     setStatus('已开麦，说话吧。');

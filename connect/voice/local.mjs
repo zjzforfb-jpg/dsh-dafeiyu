@@ -1,9 +1,9 @@
-import { execFile as execCallback } from 'node:child_process';
+import { execFile as execCallback, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isSilk } from 'silk-wasm';
-import { synthesizeMinimax } from './cloud.mjs';
+import { synthesizeMinimax, synthesizeMinimaxStream } from './cloud.mjs';
 const exec=promisify(execCallback);
 const FF='/opt/homebrew/bin/ffmpeg';
 export class LocalVoice {
@@ -67,6 +67,25 @@ export class LocalVoice {
     await this.run(FF,['-nostdin','-hide_banner','-loglevel','error','-y','-i',wav,'-c:a','aac','-b:a','64k',file],signal);
     for(const f of wantSilk?[source,wav,pcm,silk,file]:[source,wav,file])chmodSync(f,0o600);
     return {duration_ms:Math.round(info.duration_ms),silk:wantSilk?readFileSync(silk):null,file:readFileSync(file),fileName:'大肥鱼语音回复.m4a',text:plain};
+  }
+  /** 流式合成：边收 MiniMax SSE 分片边用 ffmpeg 解码成 PCM16 回调，供实时通话直接播放。 */
+  async streamSynthesize(id,text,signal,{onPcm=()=>{},sampleRate=24000}={}){
+    const plain=text.replace(/\[\[.*?\]\]/gs,'').replace(/[*`#]/g,'').trim().slice(0,240);
+    if(!plain)throw new Error('voice_empty_reply');
+    const tts=this.ttsConfig();
+    if(tts.provider!=='minimax')return null;
+    const ff=spawn(FF,['-nostdin','-hide_banner','-loglevel','error','-i','pipe:0','-f','s16le','-ac','1','-ar',String(sampleRate),'pipe:1'],{stdio:['pipe','pipe','ignore']});
+    let bytes=0;
+    ff.stdout.on('data',chunk=>{bytes+=chunk.length;onPcm(chunk);});
+    const done=new Promise((resolve,reject)=>{ff.on('error',reject);ff.on('close',code=>code===0?resolve():reject(new Error(signal?.aborted?'voice_cancelled':'voice_process_failed')));});
+    const kill=()=>{try{ff.kill('SIGKILL');}catch{}};
+    signal?.addEventListener('abort',kill,{once:true});
+    try{
+      await synthesizeMinimaxStream(plain,tts,signal,{onAudio:mp3=>{if(!ff.stdin.destroyed)ff.stdin.write(mp3);}});
+      ff.stdin.end();
+      await done;
+    }finally{signal?.removeEventListener('abort',kill);kill();}
+    return {duration_ms:Math.round(bytes/2/sampleRate*1000),bytes,sampleRate};
   }
   artifacts(id){const dir=this.dir(id);return {silk:readFileSync(join(dir,'reply.silk')),file:readFileSync(join(dir,'reply.m4a')),fileName:'大肥鱼语音回复.m4a'};}
   status(){let tts;try{const c=this.ttsConfig();tts=c.provider==='minimax'?'minimax_'+(c.model??'speech-2.8-hd'):c.provider==='qwen3_mlx'?'qwen3_mlx_'+(c.speaker??'Serena'):c.provider==='macos_say'&&process.platform==='darwin'?'macOS_say_'+this.voice:'unavailable';}catch{tts='invalid_configuration';}return {asr:existsSync(this.model)&&existsSync(this.whisper)?'ready':'not_installed',tts,codec:'silk_wasm',audio_files:true};}

@@ -43,6 +43,28 @@ test('call service transcribes, replies and returns base64 audio while keeping h
   assert.deepEqual(asked[1].history, [{ role: 'user', content: '爸爸你好' }, { role: 'assistant', content: '我在呢' }]);
 });
 
+test('call service streams reply audio chunks when the voice supports it', async () => {
+  const sent = [];
+  const voice = fakeVoice({
+    streamSynthesize: async (_id, text, signal, { onPcm }) => { onPcm(Buffer.from([1, 2])); onPcm(Buffer.from([3, 4])); return { duration_ms: 42, bytes: 4, sampleRate: 24000 }; },
+  });
+  const calls = new CallService({ voice, ask: async () => '好的' });
+  const result = await calls.respond(SESSION, { data: pcm(1).toString('base64'), sampleRate: 16000 }, { onAudio: chunk => sent.push(chunk) });
+  assert.equal(result.streamed, true);
+  assert.equal(result.duration_ms, 42);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].toString('hex'), '0102');
+});
+
+test('call service can cancel an in-flight streaming reply', async () => {
+  const voice = fakeVoice({ streamSynthesize: async (_id, text, signal) => { await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('voice_cancelled')))); } });
+  const calls = new CallService({ voice, ask: async () => '好的' });
+  const inFlight = calls.respond(SESSION, { data: pcm(1).toString('base64'), sampleRate: 16000 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  calls.controllers.get(SESSION)?.abort();
+  assert.equal(await inFlight.catch(error => error.message), 'voice_cancelled');
+});
+
 test('call service rejects malformed audio and refuses a second turn while busy', async () => {
   let release;
   const gate = new Promise(resolve => { release = resolve; });

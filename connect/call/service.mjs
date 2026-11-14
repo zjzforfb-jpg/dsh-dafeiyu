@@ -30,6 +30,7 @@ export class CallService {
     Object.assign(this, { voice, ask, log, now, maxHistory, busyTimeoutMs });
     this.sessions = new Map();
     this.pending = new Map();
+    this.controllers = new Map();
   }
 
   session(id) {
@@ -50,16 +51,21 @@ export class CallService {
   async receive(ws, id, raw) {
     let value;
     try { value = JSON.parse(raw.toString()); } catch { return ws.send(JSON.stringify({ type: 'error', error: 'invalid_message' })); }
+    if (value?.type === 'cancel') { this.controllers.get(id)?.abort(); return; }
     if (value?.type !== 'audio') return;
     const send = payload => { if (ws.readyState === 1) ws.send(JSON.stringify(payload)); };
     try {
       const result = await this.respond(id, value, {
         onTranscript: text => send({ type: 'transcript', text }),
         onReply: text => send({ type: 'reply_text', text }),
+        onAudio: chunk => send({ type: 'audio_chunk', sampleRate: 24000, data: chunk.toString('base64') }),
       });
-      send({ type: 'reply', text: result.reply, audio: result.audio, mime: result.mime, duration_ms: result.duration_ms });
+      if (result.streamed) send({ type: 'reply_end', duration_ms: result.duration_ms });
+      else send({ type: 'reply', text: result.reply, audio: result.audio, mime: result.mime, duration_ms: result.duration_ms });
     } catch (error) {
-      send({ type: 'error', error: error.message === 'call_busy' ? 'call_busy' : error.message });
+      const message = error.message === 'voice_cancelled' ? 'cancelled' : error.message;
+      if (message === 'cancelled') send({ type: 'reply_end', duration_ms: 0, cancelled: true });
+      else send({ type: 'error', error: message === 'call_busy' ? 'call_busy' : message });
     }
   }
 
@@ -72,23 +78,32 @@ export class CallService {
     const session = this.session(id);
     if (session.busy && this.now() - session.busySince < this.busyTimeoutMs) throw new Error('call_busy');
     session.busy = true; session.busySince = this.now();
+    const controller = new AbortController();
+    this.controllers.set(id, controller);
     try {
       const audioId = createHash('sha256').update(`${id}:${this.now()}:${pcm.length}`).digest('hex');
-      const transcript = await this.voice.transcribeBytes(audioId, pcmToWav(pcm, sampleRate));
+      const transcript = await this.voice.transcribeBytes(audioId, pcmToWav(pcm, sampleRate), controller.signal);
       const text = String(transcript.text ?? '').trim();
       if (!text) throw new Error('voice_not_understood');
       hooks.onTranscript?.(text);
       const reply = String(await this.ask({ text, history: session.history.slice(-this.maxHistory) })).trim();
       if (!reply) throw new Error('empty_reply');
       hooks.onReply?.(reply);
-      const audio = await this.voice.synthesize(audioId, reply, undefined, { silk: false });
+      let streamed = null;
+      if (typeof this.voice.streamSynthesize === 'function') {
+        try { streamed = await this.voice.streamSynthesize(audioId, reply, controller.signal, { onPcm: chunk => hooks.onAudio?.(chunk) }); }
+        catch (error) { if (controller.signal.aborted) throw error; streamed = null; }
+      }
       session.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
       session.history = session.history.slice(-this.maxHistory);
-      return { transcript: text, reply, audio: audio.file.toString('base64'), mime: 'audio/mp4', duration_ms: audio.duration_ms };
+      if (streamed) return { transcript: text, reply, streamed: true, duration_ms: streamed.duration_ms };
+      const audio = await this.voice.synthesize(audioId, reply, undefined, { silk: false });
+      return { transcript: text, reply, streamed: false, audio: audio.file.toString('base64'), mime: 'audio/mp4', duration_ms: audio.duration_ms };
     } finally {
+      this.controllers.delete(id);
       session.busy = false;
     }
   }
 
-  close() { this.sessions.clear(); this.pending.clear(); }
+  close() { for (const controller of this.controllers.values()) controller.abort(); this.controllers.clear(); this.sessions.clear(); this.pending.clear(); }
 }
