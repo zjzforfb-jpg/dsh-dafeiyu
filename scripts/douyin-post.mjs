@@ -8,9 +8,30 @@
 import { execFileSync } from 'node:child_process';
 import { deviceSerial } from '../device/wechat.mjs';
 import { dumpUi, sleep, tapPoint } from '../device/uia.mjs';
-import { withAdbKeyboard, inputText, adbShell } from '../device/uia.mjs';
+import { withAdbKeyboard, inputText } from '../device/uia.mjs';
+import { adbShell } from '../device/douyin.mjs';
 import { composePost } from '../connect/douyin/poster.mjs';
 import { openHub, recordActivity } from '../connect/memory-hub.mjs';
+import { readFileSync } from 'node:fs';
+
+async function makeTitle(home, caption) {
+  try {
+    const settings = JSON.parse(readFileSync(`${home}/dsh-pet/standalone-ai.json`, 'utf8'));
+    const response = await fetch('http://127.0.0.1:3110/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.apiKey}` },
+      body: JSON.stringify({
+        model: 'deepseek-flash',
+        messages: [{ role: 'user', content: `给这条抖音图文起一个爆款标题：20 字以内、带一点悬念或可爱情绪，不要井号不要引号，只输出标题。正文参考：${caption}` }],
+        max_tokens: 90,
+        thinking: { type: 'disabled' },
+      }),
+    });
+    const data = await response.json();
+    const text = String(data?.choices?.[0]?.message?.content ?? '').replace(/[""]/gu, '').split('\n')[0].trim();
+    return text.slice(0, 20) || caption.slice(0, 18);
+  } catch { return caption.slice(0, 18); }
+}
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -45,11 +66,32 @@ await sleep(5000);
 await tapPoint(serial, { x: 900, y: 2741 }); // 下一步（图片编辑页）
 await sleep(3200);
 
-// 填文案
-await tapPoint(serial, { x: 238, y: 1305 });
+// 标题
+const title = option('title') || await makeTitle(home, post.caption);
+await tapPoint(serial, { x: 670, y: 1208 });
 await sleep(900);
-await withAdbKeyboard(serial, async () => inputText(serial, post.caption));
+await adbShell(serial, 'am broadcast -a ADB_CLEAR_TEXT');
+await withAdbKeyboard(serial, async () => inputText(serial, title));
+await sleep(600);
+// 正文 + 话题（末尾留空格，避免被联想成 #token过期）
+const body = `${post.caption}\n#大肥鱼 #deepseek #claude #token `;
+await tapPoint(serial, { x: 670, y: 1439 });
+await sleep(900);
+await adbShell(serial, 'am broadcast -a ADB_CLEAR_TEXT');
+await withAdbKeyboard(serial, async () => inputText(serial, body));
+await sleep(700);
+await adbShell(serial, 'input keyevent 4');
 await sleep(800);
+// 自主声明：内容由 AI 生成
+try {
+  const decl = (await dumpUi(serial)).find((node) => (node.text ?? '').includes('自主声明'));
+  if (decl && !/AI 生成/u.test(decl.text ?? '')) {
+    await tapPoint(serial, { x: decl.bounds.cx, y: decl.bounds.cy });
+    await sleep(1500);
+    const opt = (await dumpUi(serial)).find((node) => node.text === '内容由AI生成');
+    if (opt) { await tapPoint(serial, { x: opt.bounds.cx, y: opt.bounds.cy }); await sleep(1200); }
+  }
+} catch {}
 
 const nodes = await dumpUi(serial);
 const publish = nodes.find((node) => node.text === '发作品');

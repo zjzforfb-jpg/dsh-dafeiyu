@@ -72,6 +72,17 @@ export const ACTIONS = {
       return `看了 ${watched} 条视频，按每条看完的节奏走的。`;
     },
   },
+  'douyin.publish': {
+    label: '发一条图文日常',
+    async run({ root }) {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execAsync = promisify(execFile);
+      const { stdout } = await execAsync('node', ['scripts/douyin-post.mjs', '--publish'], { cwd: root, timeout: 480_000 });
+      const tail = String(stdout).trim().split('\n').slice(-6).join(' ');
+      return tail.slice(0, 160) || '图文发出去了。';
+    },
+  },
   'qq.hangup': {
     label: '挂断 QQ 通话',
     async run({ root }) {
