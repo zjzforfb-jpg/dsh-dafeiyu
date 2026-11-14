@@ -36,19 +36,29 @@
 | 语音合成 | MiniMax key 在钥匙串，`node scripts/connect.mjs ilink voice status` |
 | 大脑 | `curl 127.0.0.1:3110/health` |
 
-## 微信里的设置（每次通话前）
+## 微信里的设置
 
-微信 → 设置 → 通用设置 → 音视频通话（不同版本路径略有差异）：
+**微信 macOS 版没有音频设备选择。** 它跟随系统默认输入/输出，所以切换的是系统默认设备：
 
-- 麦克风：`BlackHole 2ch`
-- 扬声器：`BlackHole 16ch`
+```bash
+node scripts/sound.mjs --enable    # 输入 → BlackHole 2ch，输出 → BlackHole 16ch
+node scripts/sound.mjs --status    # 检查是否就绪
+```
 
-系统「声音」输出改为多输出设备，保证你自己也能听到对方。
+切换后**重启一次微信**（⌘Q 再打开），让它重新读取设备。
+
+`--enable` 会记住切换前的设备；通话结束运行 `node scripts/sound.mjs --restore` 恢复。
+你自己听对方：`--bridge` 会把从 BlackHole 16ch 听到的声音同时放给一个物理输出（默认
+`STUDIO M PRO`，可用 `SOUND_MONITOR=...` 指定）——所以通话期间必须让 `--bridge` 一直开着。
+
+> 没有用「多输出设备」：实测聚合设备（DAW 多声道）的回路不可靠、采样率还被压到 44.1k；
+> 直接用「系统输出 = BlackHole 16ch + 软件监听到物理声卡」更稳。
 
 ## 启动
 
 ```bash
 cd /Volumes/macOS/tools/DSH-dafeiyu
+node scripts/sound.mjs --status         # 检查系统默认设备是否指向声卡
 node scripts/sound.mjs --check          # 检查设备与语音能力
 node scripts/sound.mjs --say "测试一下"  # 把一句话注入 BlackHole 2ch（验证注入）
 node scripts/sound.mjs --bridge         # 开始监听并自动应答（Ctrl+C 结束）

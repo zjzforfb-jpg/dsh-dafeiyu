@@ -52,12 +52,22 @@ def capture(args):
     index, info = find_device(args.input, "input")
     channels = max(1, min(2, info["max_input_channels"]))
     frames = max(64, int(args.capture_rate * args.block_ms / 1000))
+    monitor = None
+    if args.monitor:
+        monitor_index, monitor_info = find_device(args.monitor, "output")
+        monitor_channels = max(1, min(2, monitor_info["max_output_channels"]))
+        monitor = sd.OutputStream(device=monitor_index, channels=monitor_channels, samplerate=args.capture_rate, dtype="float32", blocksize=frames)
+        monitor.start()
+        sys.stderr.write(json.dumps({"event": "monitor", "device": monitor_info["name"]}) + "\n")
+        sys.stderr.flush()
     sys.stderr.write(json.dumps({"event": "capture", "device": info["name"], "channels": channels, "rate": args.capture_rate}) + "\n")
     sys.stderr.flush()
     with sd.InputStream(device=index, channels=channels, samplerate=args.capture_rate, dtype="float32", blocksize=frames) as stream:
         while not stop.is_set():
             data, _ = stream.read(frames)
             mono = data.mean(axis=1) if channels > 1 else data[:, 0]
+            if monitor is not None:
+                monitor.write(np.repeat(mono[:, None], monitor_channels, axis=1))
             mono = resample(mono, args.capture_rate, args.stdout_rate)
             pcm = np.clip(mono, -1.0, 1.0)
             sys.stdout.buffer.write((pcm * 32767).astype("<i2").tobytes())
@@ -104,6 +114,7 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--input", default="BlackHole 16ch")
     parser.add_argument("--output", default="BlackHole 2ch")
+    parser.add_argument("--monitor", default="")
     parser.add_argument("--capture-rate", type=int, default=48000)
     parser.add_argument("--play-rate", type=int, default=48000)
     parser.add_argument("--out-rate", type=int, default=24000)

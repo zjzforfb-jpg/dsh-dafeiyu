@@ -20,10 +20,11 @@ export class SoundBridge {
     script = SCRIPT,
     input = 'BlackHole 16ch',
     output = 'BlackHole 2ch',
+    monitor = '',
     log = () => {},
     onStatus = () => {},
   } = {}) {
-    Object.assign(this, { voice, ask, python, script, input, output, log, onStatus });
+    Object.assign(this, { voice, ask, python, script, input, output, monitor, log, onStatus });
     this.queue = [];
     this.busy = false;
     this.speaking = false;
@@ -37,6 +38,7 @@ export class SoundBridge {
     if (this.input) args.push('--input', this.input);
     else args.push('--input', '');
     if (this.output) args.push('--output', this.output);
+    if (this.monitor) args.push('--monitor', this.monitor);
     this.child = spawn(this.python, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.on('exit', (code) => {
       this.log(`音频桥退出（code ${code ?? 'null'}）`);
