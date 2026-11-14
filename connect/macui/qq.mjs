@@ -49,11 +49,9 @@ export function findCallWindow(windows) {
 
 /** Dismiss any popup (member picker, menus) before driving the UI. */
 function dismissPopups() {
-  try {
-    execFileSync('osascript', ['-e', 'tell application "System Events" to key code 53'], { stdio: 'ignore' });
-    execFileSync('osascript', ['-e', 'tell application "System Events" to key code 53'], { stdio: 'ignore' });
-  } catch {
-    // Escape is best effort.
+  for (let i = 0; i < 3; i += 1) {
+    try { execFileSync('osascript', ['-e', 'tell application "System Events" to key code 53'], { stdio: 'ignore' }); } catch {}
+    execFileSync('sleep', ['0.35']);
   }
 }
 
@@ -71,7 +69,7 @@ export async function openChat(bins, name) {
   execFileSync('osascript', ['-e', 'tell application "System Events" to keystroke "v" using {command down}'], { stdio: 'ignore' });
   await sleep(1200);
   execFileSync('osascript', ['-e', 'tell application "System Events" to key code 36'], { stdio: 'ignore' });
-  await sleep(1600);
+  await sleep(2200);
   return findMainWindow(listWindows(bins, QQ_LAYOUT.owner)) ?? main;
 }
 
