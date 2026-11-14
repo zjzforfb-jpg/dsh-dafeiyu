@@ -1,0 +1,8 @@
+{
+  "baseUrl": "https://grsai.dakka.com.cn",
+  "apiKey": "<set in runtime/douyin/image.json or GRSAI_API_KEY>",
+  "models": ["nano-banana-2.1", "gpt-image-2.6-flare"],
+  "size": "2K",
+  "pollIntervalMs": 3000,
+  "maxWaitMs": 420000
+}

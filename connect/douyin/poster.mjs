@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { personaBlock, loadPersona, applyEvent, savePersona, humorRate } from './persona.mjs';
-import { generateImage } from './image.mjs';
+import { generateImageAuto } from './image.mjs';
 
 function settings(home) {
   const file = join(home, 'dsh-pet', 'standalone-ai.json');
@@ -65,9 +65,10 @@ export async function composePost({ root = process.cwd(), home, theme, dryRun = 
   const result = { caption, imagePrompt, theme: selectedTheme, mood: persona.mood.mood, humor: humorRate(persona, scene) };
 
   if (!dryRun) {
-    const image = await generateImage(imagePrompt, { root, aspect: '3:4' });
+    const image = await generateImageAuto(imagePrompt, { root, aspect: '3:4' });
     result.imageFile = image.file;
     result.imageBytes = image.bytes;
+    result.imageProvider = image.provider ?? 'unknown';
   }
 
   savePersona(root, persona);

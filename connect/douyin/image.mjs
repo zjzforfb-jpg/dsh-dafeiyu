@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { generateImageGrs } from './grs.mjs';
 
 function minimaxKey() {
   if (process.env.MINIMAX_API_KEY) return process.env.MINIMAX_API_KEY;
@@ -42,4 +43,16 @@ export async function generateImage(prompt, { root = process.cwd(), aspect = '1:
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, bytes, { mode: 0o600 });
   return { file, bytes: bytes.length, prompt: text, aspect };
+}
+
+/** 统一入口：优先 grs（nano-banana-2.1 → gpt-image-2.6-flare，2K），失败再回落 MiniMax。 */
+export async function generateImageAuto(prompt, { root = process.cwd(), aspect = '3:4', refs, models } = {}) {
+  const referenceRefs = refs ?? [join(root, 'runtime', 'douyin', 'refs', 'dafeiyu-ref.png')];
+  try {
+    const result = await generateImageGrs(prompt, { root, refs: referenceRefs, aspectRatio: aspect, models });
+    return { ...result, provider: 'grsai' };
+  } catch (error) {
+    const fallback = await generateImage(prompt, { root, aspect });
+    return { ...fallback, provider: 'minimax', grsError: error.message };
+  }
 }
