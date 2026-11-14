@@ -35,17 +35,24 @@ export const ACTIONS = {
   'douyin.browse': {
     label: '刷一会儿抖音',
     async run({ root, args = {} }) {
-      const n = Math.min(Math.max(Number(args.count ?? 8), 3), 20);
+      const n = Math.min(Math.max(Number(args.count ?? 5), 2), 12);
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
+      const { watchDelayMs, sleep, swipeJitter } = await import('./douyin/humanize.mjs');
       const run1 = promisify(execFile);
       await run1('adb', ['shell', 'am', 'start', '-n', 'com.ss.android.ugc.aweme/.splash.SplashActivity'], { timeout: 30_000 });
-      await new Promise((r) => setTimeout(r, 3500));
+      await sleep(4000);
+      let watched = 0;
       for (let i = 0; i < n; i += 1) {
-        await run1('adb', ['shell', 'input', 'swipe', '656', '2100', '656', '800', '320'], { timeout: 20_000 });
-        await new Promise((r) => setTimeout(r, 2200));
+        const stay = watchDelayMs();
+        await sleep(stay);
+        watched += 1;
+        if (i === n - 1) break;
+        const [x1, y1, x2, y2, ms] = swipeJitter();
+        await run1('adb', ['shell', 'input', 'swipe', String(x1), String(y1), String(x2), String(y2), String(ms)], { timeout: 20_000 });
+        await sleep(rand0(1200, 2600));
       }
-      return `刷了 ${n} 条视频。`;
+      return `看了 ${watched} 条视频，按每条看完的节奏走的。`;
     },
   },
   'qq.hangup': {
@@ -56,6 +63,8 @@ export const ACTIONS = {
     },
   },
 };
+
+function rand0(min, max) { return Math.round(min + Math.random() * (max - min)); }
 
 function summarize(stdout) {
   const text = String(stdout ?? '').trim();

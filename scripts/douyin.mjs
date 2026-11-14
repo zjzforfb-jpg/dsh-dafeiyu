@@ -214,6 +214,10 @@ async function main() {
       if (/DetailActivity/u.test(opened)) break;
     }
     if (!/DetailActivity/u.test(opened)) throw new Error(`detail_not_opened:${opened}`);
+    const { watchDelayMs, sleep: humanSleep } = await import('../connect/douyin/humanize.mjs');
+    const watchMs = Number(option('watch-ms', '0')) || watchDelayMs();
+    console.log(JSON.stringify({ watching_ms: watchMs }, null, 0));
+    await humanSleep(watchMs);
     let text = option('text');
     if (!text) {
       if (!has('generate')) throw new Error('need_text_or_generate');
