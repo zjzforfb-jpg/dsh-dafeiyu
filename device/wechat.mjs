@@ -24,7 +24,7 @@ export async function deviceSerial() {
     .slice(1)
     .map((line) => line.trim().split(/\s+/u))
     .filter((row) => row[1] === 'device');
-  if (rows.length !== 1) throw new Error(`微信发送需要恰好一台已授权设备；当前 ${rows.length} 台`);
+  if (rows.length !== 1) throw new Error(`手机没连上（adb 看到 ${rows.length} 台设备）：抖音和微信操作都需要恰好一台在线的安卓手机。`);
   return rows[0][0];
 }
 

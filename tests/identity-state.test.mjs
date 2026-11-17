@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict'; import { test } from 'node:test'; import { DatabaseSync } from 'node:sqlite'; import { getIdentityState, updateIdentityState } from '../brain/identity-state.mjs';
+test('人格动态状态可更新且范围受控',()=>{const db=new DatabaseSync(':memory:');assert.equal(getIdentityState(db).mood,'平静');const state=updateIdentityState(db,{mood:'开心',energy:9,curiosity:-1,reason:'完成任务'});assert.equal(state.mood,'开心');assert.equal(state.energy,1);assert.equal(state.curiosity,0);db.close();});

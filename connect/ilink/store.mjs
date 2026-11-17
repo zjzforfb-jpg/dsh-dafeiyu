@@ -1,4 +1,5 @@
 import { initVoice } from '../voice/service.mjs';
+import { ensureColumns } from '../core/migrations.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 export function initIlink(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS ilink_accounts(id TEXT PRIMARY KEY,owner_peer_id TEXT NOT NULL,binding_id TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'bound',last_poll TEXT,last_error TEXT);
@@ -6,9 +7,11 @@ export function initIlink(db) {
     CREATE TABLE IF NOT EXISTS ilink_cursors(binding_id TEXT PRIMARY KEY,cursor TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ilink_messages(id TEXT PRIMARY KEY,account_id TEXT NOT NULL,binding_id TEXT NOT NULL,peer_id TEXT NOT NULL,upstream_id TEXT NOT NULL,text TEXT NOT NULL DEFAULT '',context_token TEXT,created_ms INTEGER NOT NULL,status TEXT NOT NULL,reply TEXT,error TEXT,client_id TEXT NOT NULL,outbound_id TEXT,updated_at TEXT NOT NULL DEFAULT(datetime('now')));
     CREATE INDEX IF NOT EXISTS ilink_inbox ON ilink_messages(account_id,binding_id,status,created_ms);
-    CREATE TABLE IF NOT EXISTS ilink_usage(account_id TEXT NOT NULL,day TEXT NOT NULL,model_calls INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(account_id,day));
+    CREATE TABLE IF NOT EXISTS ilink_usage(account_id TEXT NOT NULL,day TEXT NOT NULL,model_calls INTEGER NOT NULL DEFAULT 0,voice_requests INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(account_id,day));
     UPDATE ilink_messages SET status='unknown',error='process_restarted_during_send' WHERE status='sending';
     UPDATE ilink_messages SET status='failed',error='process_restarted_during_generation' WHERE status='drafting';`);
+  // 旧库补 voice_requests 列（老建表语句漏了它，新库已经有了）。
+  ensureColumns(db, 'ilink_usage', ['voice_requests']);
   initVoice(db);
 }
 export function registerAccount(db, account) {

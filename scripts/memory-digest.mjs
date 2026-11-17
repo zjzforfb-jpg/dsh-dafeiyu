@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openHub, recordActivity } from '../connect/memory-hub.mjs';
-import { dailyEvents, markDailyDigested, purgeDailyMemory } from '../connect/daily-memory.mjs';
+import { ownerDigestEvents, markDailyDigested, purgeDailyMemory } from '../connect/daily-memory.mjs';
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -21,7 +21,7 @@ const hub = openHub(root);
 if (!hub) { console.error('memory_hub_unavailable'); process.exit(1); }
 
 const rows = hub.prepare("SELECT content, created_at FROM memories WHERE kind='activity' AND content LIKE ? ORDER BY id").all(`【活动·${day}%`);
-const events = dailyEvents(hub,day,{undigestedOnly:true});
+const events = ownerDigestEvents(hub,day,{undigestedOnly:true});
 if (!rows.length && !events.length) {
   console.log(JSON.stringify({ day, activities: 0, daily_events: 0, digest: null }, null, 2));
   process.exit(0);

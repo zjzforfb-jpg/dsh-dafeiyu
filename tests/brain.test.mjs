@@ -58,6 +58,11 @@ test('明确保存的长期记忆会生成可审计的结构化事实投影', ()
   } finally { db.close(); rmSync(home, { recursive: true, force: true }); }
 });
 
+test('被替代的事实不会继续参与召回', () => {
+  const home = mkdtempSync(join(tmpdir(), 'dafeiyu-superseded-')); const db = openMemory(join(home, 'memory.sqlite'));
+ try { const a=db.prepare("INSERT INTO memories(content,kind,source,confidence) VALUES('爸爸喜欢苹果','user_fact','test',1)").run(); const b=db.prepare("INSERT INTO memories(content,kind,source,confidence) VALUES('爸爸喜欢草莓','user_fact','test',1)").run(); db.prepare("INSERT INTO memory_facts(memory_id,subject,predicate,object_text,status,confidence) VALUES(?,?,?,?,?,?)").run(a.lastInsertRowid,'owner','preference','苹果','superseded',1); db.prepare("INSERT INTO memory_facts(memory_id,subject,predicate,object_text,status,confidence) VALUES(?,?,?,?,?,?)").run(b.lastInsertRowid,'owner','preference','草莓','confirmed',1); assert.equal(recall(db,'苹果水果',5).length,0); assert.equal(recall(db,'草莓水果',5)[0].content,'爸爸喜欢草莓'); } finally { db.close(); rmSync(home,{recursive:true,force:true}); }
+});
+
 test('明确保存的记忆在新一轮对话中被召回', async () => {
   const home = mkdtempSync(join(tmpdir(), 'dafeiyu-brain-'));
   const received = [];
@@ -88,6 +93,9 @@ test('明确保存的记忆在新一轮对话中被召回', async () => {
     assert.match(received[1].messages[0].content, /为什么要记住名字/u);
     const health = await (await fetch(`http://127.0.0.1:${brain.port}/health`)).json();
     assert.equal(health.memoryCount, 1);
+    const audit = openMemory(join(home, 'dafeiyu-memory.sqlite'));
+    assert.ok(audit.prepare("SELECT COUNT(*) AS n FROM agent_events WHERE channel='desktop'").get().n >= 4);
+    audit.close();
   } finally {
     await brain.close();
     await new Promise((resolve) => upstream.close(resolve));

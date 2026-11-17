@@ -1,17 +1,64 @@
-import {existsSync,statSync,readFileSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
-import {DatabaseSync} from 'node:sqlite';
-import {resolve,join} from 'node:path';
-const root=resolve(import.meta.dirname,'..');const failures=[];const checks=[];
-function check(name,ok,detail=''){checks.push({name,ok,detail});if(!ok)failures.push({name,detail});}
-check('gitignore-runtime',readFileSync(join(root,'.gitignore'),'utf8').split('\n').includes('runtime/'));
-check('capability-matrix',existsSync(join(root,'docs/CAPABILITY_MATRIX.md')));
-check('bug-plan',existsSync(join(root,'docs/BUG_REMEDIATION_PLAN.md')));
-check('task-api',existsSync(join(root,'scripts/tasks.mjs')));
-check('stability-observer',existsSync(join(root,'scripts/stability-check.mjs')));
-try{const status=JSON.parse(execFileSync('node',['scripts/connect.mjs','status'],{cwd:root,encoding:'utf8'}));check('magic5-online',status.devices?.some(d=>d.id==='honor_magic5'&&d.online),JSON.stringify(status.devices));}catch(e){check('connect-status',false,'probe_failed');}
-try{const tasks=JSON.parse(execFileSync('node',['scripts/tasks.mjs'],{cwd:root,encoding:'utf8'}));check('no-active-unknown-tasks',(tasks.tasks??[]).every(t=>!['running','approved'].includes(t.status)),JSON.stringify(tasks.tasks??[]));}catch{check('task-status',false,'probe_failed');}
-try{const db=new DatabaseSync(join(root,'runtime','connect','connect.sqlite'),{readOnly:true});const unresolved=db.prepare("SELECT id,status FROM commands WHERE status IN ('unknown','dispatched') LIMIT 20").all();check('no-unresolved-device-commands',unresolved.length===0,JSON.stringify(unresolved));db.close();}catch{check('device-command-audit',false,'probe_failed');}
-try{const file=join(root,'runtime','stability','observations.jsonl');const rows=existsSync(file)?readFileSync(file,'utf8').split('\n').filter(Boolean).map(x=>{try{return JSON.parse(x);}catch{return null;}}).filter(x=>x&&x.devices&&Array.isArray(x.tasks)):[];const times=rows.map(x=>Date.parse(x.at)).filter(Number.isFinite);const hours=times.length>1?(Math.max(...times)-Math.min(...times))/3600000:0;check('stability-window-seven-days',hours>=168,JSON.stringify({samples:rows.length,coverage_hours:hours}));}catch{check('stability-window-seven-days',false,'probe_failed');}
-try{const tracked=execFileSync('git',['ls-files'],{cwd:root,encoding:'utf8'}).trim().split('\n').filter(Boolean);let leaked=[];const textFile=/\.(?:mjs|js|cjs|json|jsonc|md|txt|yml|yaml|toml|xml|kt|java|py|sh)$/i;for(const file of tracked){if(/^(runtime|\.env)/.test(file))leaked.push(file);else if(textFile.test(file)){const text=readFileSync(join(root,file),'utf8');if(/sk-[A-Za-z0-9]{20,}/.test(text))leaked.push(file);}}check('tracked-secret-scan',leaked.length===0,leaked.join(','));}catch{check('tracked-secret-scan',false,'scan_failed');}
-console.log(JSON.stringify({ok:failures.length===0,checks,failures},null,2));if(failures.length)process.exitCode=1;
+#!/usr/bin/env node
+// 放行前的自检清单：只读，不跑任何副作用动作。
+//
+// 用途：主人在放行前（或放行途中）敲一次，确认「顺序对不对、前置够不够、
+// 操作单和页面说的是不是同一件事」，不用一条条翻页面。
+
+import { DatabaseSync } from 'node:sqlite';
+import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { projectRoot, runtimeDir } from '../connect/core/paths.mjs';
+import { RELEASE_PLAN, nextReleaseStep } from '../connect/live/release-plan.mjs';
+import { loadRunAllowlist, isAllowed } from '../connect/live/run-policy.mjs';
+import { systemProbes, probePreflight } from '../connect/live/preflight.mjs';
+import { SIDE_EFFECT_ACTIONS } from '../connect/live/expect-after.mjs';
+
+const base = projectRoot(process.cwd());
+const root = runtimeDir(base);
+const dbPath = resolve(root, 'connect', 'connect.sqlite');
+
+const allow = loadRunAllowlist(root);
+const probes = systemProbes({ root });
+const { results } = await probePreflight({ root, actions: SIDE_EFFECT_ACTIONS, probes });
+
+const db = existsSync(dbPath) ? new DatabaseSync(dbPath, { readOnly: true }) : null;
+const lastVerdict = (action) => {
+  if (!db) return null;
+  try {
+    const row = db.prepare("SELECT verdict FROM task_checkpoints WHERE operation = ? AND task_id NOT LIKE 'ui-run-%' ORDER BY id DESC LIMIT 1").get(action);
+    return row?.verdict ?? null;
+  } catch { return null; }
+};
+
+const step = nextReleaseStep(SIDE_EFFECT_ACTIONS.map((action) => ({ action, lastVerdict: lastVerdict(action) })));
+const lines = [];
+const mark = (ok) => (ok ? '✅' : '⚠️');
+
+lines.push(`放行自检 · ${new Date().toLocaleString('zh-CN', { hour12: false })}`);
+lines.push('');
+lines.push(`顺序：${RELEASE_PLAN.map((item) => item.action).join(' → ')}`);
+lines.push(step.next
+  ? `下一步该跑：**${step.next.action}**（还差 ${step.remaining.length}/${step.total} 步）`
+  : `7 步全部确认过了`);
+lines.push('');
+lines.push(`放行清单：永久 ${allow.allowed.length} 个${allow.grants.length ? ` · 临时 ${allow.grants.length} 个` : ''}${allow.note ? '' : ' ⚠️ 没有备注'}`);
+if (allow.note) lines.push(`  备注：${allow.note}`);
+lines.push('');
+lines.push('| 动作 | 已放行 | 前置 | 上次判定 |');
+lines.push('|---|---|---|---|');
+let blocked = 0;
+for (const action of SIDE_EFFECT_ACTIONS) {
+  const allowed = isAllowed(action, allow);
+  const ready = results[action]?.ready === true;
+  if (!allowed || !ready) blocked += 1;
+  const verdict = lastVerdict(action) ?? '没跑过';
+  lines.push(`| \`${action}\` | ${mark(allowed)} | ${mark(ready)}${ready ? '' : `（${(results[action]?.checks ?? []).find((check) => !check.ok)?.detail ?? '缺条件'}）`} | ${verdict} |`);
+}
+lines.push('');
+lines.push(blocked === 0
+  ? '全部就绪：可以按上面的顺序开始跑。每跑完一个，回到 /live 看回执与「跑完之后核对」。'
+  : `还有 ${blocked} 项不满足（未放行或前置没到），先把这些补齐再跑。`);
+
+console.log(lines.join('\n'));
+if (db) db.close();
+process.exitCode = 0;

@@ -1,0 +1,4 @@
+import assert from 'node:assert/strict'; import { test } from 'node:test'; import { DatabaseSync } from 'node:sqlite';
+import { initTasks, proposeTask } from '../connect/tasks.mjs'; import { planWorkingTask } from '../connect/cognition-bridge.mjs'; import { workingTask } from '../connect/working-state.mjs';
+import { advancePlan } from '../brain/cognition/kernel.mjs';
+test('认知计划步骤推进后持久化下一动作和未知状态',()=>{const db=new DatabaseSync(':memory:');initTasks(db);const t=proposeTask(db,{kind:'c2c',convId:'p',sourceMessageId:'m',intent:{intent:'x',operations:['x']}});const p=planWorkingTask(db,t.id,{goal:'x',steps:['observe','send']}).plan;const next=advancePlan(p,0,{status:'succeeded',observationId:'o1'});db.prepare('UPDATE working_tasks SET plan_json=?,current_step=?,next_action=? WHERE task_id=?').run(JSON.stringify(next),'send','send',t.id);assert.equal(workingTask(db,t.id).next_action,'send');db.close();});

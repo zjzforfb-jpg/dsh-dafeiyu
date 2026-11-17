@@ -1,6 +1,8 @@
 export const MESSAGES_PAGE = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>大肥鱼 · 消息中心</title>
+<link rel="stylesheet" href="/shell/nav.css">
+<script src="/shell/nav.js" defer></script>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}
 body{margin:0;background:#0f1115;color:#e9edf3;font:15px/1.5 -apple-system,"PingFang SC",system-ui,sans-serif}
@@ -35,6 +37,7 @@ const list = document.getElementById('list');
 const stat = document.getElementById('stat');
 let filter = 'all';
 let items = [];
+let firstPaint = true;
 const fmt = t => { const d = new Date(t); return isNaN(d) ? '' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 function render() {
   const shown = items.filter(i => filter === 'all' || i.source === filter);
@@ -56,7 +59,10 @@ function render() {
     row.append(meta, bubble, status);
     return row;
   }));
-  window.scrollTo({ top: document.body.scrollHeight });
+  // 只在「本来就在底部」或第一次进来时才跟到最新，否则每 2 秒刷新会把正在翻旧消息的人拽回底部。
+  const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+  if (firstPaint || atBottom) window.scrollTo({ top: document.body.scrollHeight });
+  firstPaint = false;
 }
 async function refresh() {
   try {

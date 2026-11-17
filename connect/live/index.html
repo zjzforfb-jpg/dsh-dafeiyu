@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>大肥鱼 · 实时工作流</title>
+<link rel="stylesheet" href="/live/live.css" />
+<link rel="stylesheet" href="/shell/nav.css">
+<script src="/shell/nav.js" defer></script>
+</head>
+<body>
+<div id="glow" aria-hidden="true"></div>
+
+<header id="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">◍</div>
+    <div>
+      <h1>大肥鱼 · 实时工作流</h1>
+      <p class="sub">点任意节点、任务或事件 —— 看它这一步的输入与输出</p>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="statEvents">0</b><span>今日事件</span></div>
+    <div class="stat"><b id="statActions">0</b><span>今日执行</span></div>
+    <div class="stat fail"><b id="statFails">0</b><span>今日失败</span></div>
+    <div class="stat wait"><b id="statOpen">0</b><span>在跑任务</span></div>
+    <div class="stat review"><b id="statAwait">0</b><span>等你确认</span></div>
+  </div>
+  <div class="live" id="quotaPill" role="status" hidden title="每个小时能发几条评论（自建限速）"><span id="quotaText">评论额度 —</span></div>
+  <div class="live" id="readyPill" role="status" hidden><span id="readyText">就绪 —</span></div>
+  <div class="live" id="livePill" role="status"><i aria-hidden="true"></i><span id="liveText">连接事件流…</span></div>
+</header>
+
+<main id="layout">
+  <aside id="rail" class="card" aria-label="流水线">
+    <div class="cardHead"><h2 id="railTitle">流水线</h2><span class="tip">点阶段筛选事件</span></div>
+    <div id="stages" class="stages" role="group" aria-labelledby="railTitle"></div>
+    <div class="legend" id="stateLegend" aria-label="状态图例"></div>
+  </aside>
+
+  <section id="center" class="card" aria-label="内容">
+    <div class="tabbar" role="tablist" aria-label="内容视图">
+      <button class="tab on" role="tab" id="tab-events" data-tab="events" aria-selected="true" aria-controls="pane-events">实时事件 <em id="tabEvents">0</em></button>
+      <button class="tab" role="tab" id="tab-tasks" data-tab="tasks" aria-selected="false" aria-controls="pane-tasks" tabindex="-1">任务 <em id="tabTasks">0</em></button>
+      <button class="tab" role="tab" id="tab-slots" data-tab="slots" aria-selected="false" aria-controls="pane-slots" tabindex="-1">定时任务 <em id="tabSlots">0</em></button>
+      <button class="tab" role="tab" id="tab-tools" data-tab="tools" aria-selected="false" aria-controls="pane-tools" tabindex="-1">工具清单 <em id="tabTools">0</em></button>
+      <button class="tab" role="tab" id="tab-report" data-tab="report" aria-selected="false" aria-controls="pane-report" tabindex="-1">本轮报告</button>
+      <div class="headTools" id="streamTools">
+        <button class="chip" id="filterChip" hidden></button>
+        <button class="chip ghost" id="pauseBtn" title="暂停/继续滚动">暂停</button>
+      </div>
+    </div>
+
+    <div class="panes">
+      <div class="pane on" id="pane-events" role="tabpanel" aria-labelledby="tab-events" tabindex="0">
+        <div class="filters" id="eventFilters" role="group" aria-label="按状态筛选事件">
+          <button class="fchip on" data-state="" aria-pressed="true">全部</button>
+          <button class="fchip" data-state="ok" aria-pressed="false">成功</button>
+          <button class="fchip" data-state="fail" aria-pressed="false">失败</button>
+          <button class="fchip" data-state="active" aria-pressed="false">进行中</button>
+          <button class="fchip" data-state="wait" aria-pressed="false">等待</button>
+          <button class="fchip" data-state="review" aria-pressed="false">待确认</button>
+          <input id="eventSearch" class="fsearch" type="search" placeholder="搜消息内容 / 任务号 / 渠道" aria-label="搜索事件" />
+        </div>
+        <div id="stream" class="stream" aria-live="off"></div>
+      </div>
+      <div class="pane" id="pane-tasks" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0">
+        <div class="filters" id="taskFilters" role="group" aria-label="按状态筛选任务">
+          <button class="fchip on" data-fstate="" aria-pressed="true">全部</button>
+          <button class="fchip" data-fstate="ok" aria-pressed="false">成功</button>
+          <button class="fchip" data-fstate="fail" aria-pressed="false">失败</button>
+          <button class="fchip" data-fstate="active" aria-pressed="false">进行中</button>
+          <button class="fchip" data-fstate="review" aria-pressed="false">待确认</button>
+          <button class="fchip" data-fstate="wait" aria-pressed="false">等待</button>
+          <input id="taskSearch" class="fsearch" type="search" placeholder="搜意图 / 操作 / 来源" aria-label="搜索任务" />
+        </div>
+        <div id="tasks" class="rows"></div>
+      </div>
+      <div class="pane" id="pane-slots" role="tabpanel" aria-labelledby="tab-slots" tabindex="0"><div id="slots" class="rows"></div></div>
+      <div class="pane" id="pane-tools" role="tabpanel" aria-labelledby="tab-tools" tabindex="0">
+        <div class="coverage"><div class="covBar" id="toolCoverage" role="img" aria-label="工具跑通覆盖度"></div><span class="covNote" id="toolCoverageNote"></span></div>
+        <div class="failStrip" id="failStrip" hidden></div>
+        <div id="tools"></div>
+        <div class="retired" id="retiredStrip" hidden></div>
+      </div>
+      <div class="pane" id="pane-report" role="tabpanel" aria-labelledby="tab-report" tabindex="0">
+        <div id="reportBody"></div>
+      </div>
+    </div>
+
+    <footer class="ticker" id="ticker" aria-live="polite" aria-atomic="true">
+      <span class="tk">最近：等待事件…</span>
+    </footer>
+  </section>
+
+  <aside id="detailPanel" class="card detail" aria-label="侧栏">
+    <div class="cardHead detailHead">
+      <div class="detailTabs" role="tablist" aria-label="侧栏内容">
+        <button class="dtab on" role="tab" id="dt-event" data-dtab="event" aria-selected="true" aria-controls="dBody">事件</button>
+        <button class="dtab" role="tab" id="dt-item" data-dtab="item" aria-selected="false" aria-controls="dBody" tabindex="-1">任务与工具</button>
+      </div>
+      <button class="chip ghost" id="dBack" title="返回上一层（Backspace）" aria-label="返回上一层" hidden>←</button>
+      <button class="chip ghost" id="dClose" title="关闭（Esc）" aria-label="关闭详情">×</button>
+    </div>
+    <h2 id="dTitle" class="dTitle">详情</h2>
+    <div class="detailMeta" id="dSub"></div>
+    <div id="dBody" class="dBody">
+      <p class="empty">左边点一个阶段、一条事件、一个任务，这里会显示它收到了什么、回了什么、错在哪一步。</p>
+    </div>
+    <footer class="dFoot" id="dFoot">
+      <a id="dFlow" class="dFlow" href="/flow/" hidden>在数据流图里看这一段 →</a>
+    </footer>
+  </aside>
+</main>
+
+<div id="gate" hidden>
+  <div class="gateCard">
+    <h3>需要授权令牌</h3>
+    <p>服务是通的，只是数据接口要 Bearer 令牌。令牌在 <code>runtime/connect/credentials.json</code> 的 <code>adminToken</code>，也可以直接打开 <code>/live?token=…</code> 一次。</p>
+    <div class="gateRow"><input id="gateInput" placeholder="粘贴 adminToken" autocomplete="off" /><button id="gateBtn">授权</button></div>
+    <p class="gateErr" id="gateErr"></p>
+  </div>
+</div>
+
+<script type="module" src="/live/live.js"></script>
+</body>
+</html>

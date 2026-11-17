@@ -6,9 +6,11 @@
 import { join } from 'node:path';
 import { openMemory, capture } from '../brain/memory.mjs';
 import { initDailyMemory } from './daily-memory.mjs';
+import { runtimeDir } from './core/paths.mjs';
 
 export function openHub(root) {
-  const db=openMemory(join(root, 'runtime', 'dsh-home', 'dafeiyu-memory.sqlite'));initDailyMemory(db);return db;
+  // 同 openDouyinDb：root 可能是 <repo>/runtime/connect，必须归一到仓库根再找 runtime/dsh-home
+  const db=openMemory(join(runtimeDir(root), 'dsh-home', 'dafeiyu-memory.sqlite'));initDailyMemory(db);return db;
 }
 
 /** 记一条「我做了什么」：power 活动日志，供回忆与「今天干了什么」使用。 */
@@ -29,21 +31,21 @@ export function captureExchange(db, userText, replyText, { source = 'chat' } = {
   return capture(db, userText, replyText, { source, confidence: 0.8 });
 }
 
-/** 今天的活动摘要，直接塞进提示词。 */
-export function todayDigest(db, { now = new Date(), limit = 12 } = {}) {
+/** 今天的活动摘要，直接塞进提示词。scope 过滤：群聊的活动不该进主人私聊的提示词（R-05/R-07）。 */
+export function todayDigest(db, { now = new Date(), limit = 12, scope = 'private' } = {}) {
   const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(now);
-  const rows = db.prepare("SELECT id, content FROM memories WHERE kind = 'activity' AND active = 1 AND content LIKE ? ORDER BY id DESC LIMIT ?")
-    .all(`【活动·${stamp}】%`, limit);
+  const rows = db.prepare("SELECT id, content FROM memories WHERE kind = 'activity' AND active = 1 AND (COALESCE(scope,'private') = ? OR scope = 'public') AND content LIKE ? ORDER BY id DESC LIMIT ?")
+    .all(scope, `【活动·${stamp}】%`, limit);
   if (!rows.length) return '';
   return rows.reverse().map((row) => row.content.replace(/^【活动·[^】]+】/u, '· ')).join('\n');
 }
 
 /** 回忆时优先补上今天做过的事。 */
-export function notesWithActivities(db, question, limit = 8) {
+export function notesWithActivities(db, question, limit = 8, { scope = 'private' } = {}) {
   const notes = [];
   const asksToday = /今天|今日|刚才|刚刚|干了什么|做了什么|忙了啥/u.test(String(question ?? ''));
   if (asksToday) {
-    const digest = todayDigest(db);
+    const digest = todayDigest(db, { scope });
     if (digest) notes.push({ id: 0, content: `我今天做过这些事：\n${digest}`, kind: 'activity_digest' });
   }
   return notes;

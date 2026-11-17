@@ -65,6 +65,17 @@ export async function androidStatus() {
   return { adbReady: true, connected: results.filter((row) => row.state === 'device').length, devices: results };
 }
 
+/** Read a lightweight, read-only device observation for task recovery. */
+export async function observeAndroid(serial) {
+  const [top, size, status] = await Promise.all([
+    adb(['-s', serial, 'shell', 'dumpsys', 'activity', 'activities'], 10_000),
+    adb(['-s', serial, 'shell', 'wm', 'size'], 10_000),
+    adb(['-s', serial, 'get-state'], 10_000),
+  ]);
+  const resumed = top.match(/mResumedActivity:.*?\s([A-Za-z0-9._]+\/[A-Za-z0-9._$]+)/u)?.[1] ?? null;
+  return { serial, state: status.trim(), activity: resumed, display: size.match(/Physical size:\s*(\d+x\d+)/u)?.[1] ?? null, observed_at: new Date().toISOString() };
+}
+
 export async function captureAndroidScreenshot(outputDir) {
   const devices = parseDevices(await adb(['devices', '-l'])).filter((row) => row.state === 'device');
   if (devices.length !== 1) throw new Error(`截图需要恰好连接一台已授权设备；当前为 ${devices.length} 台`);

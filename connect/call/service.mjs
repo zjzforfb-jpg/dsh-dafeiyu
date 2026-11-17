@@ -26,11 +26,17 @@ export function pcmToWav(pcm16, sampleRate) {
 }
 
 export class CallService {
-  constructor({ voice, ask, askStream = null, log = () => {}, now = () => Date.now(), maxHistory = 16, busyTimeoutMs = 30000, onHangup = null }) {
-    Object.assign(this, { voice, ask, askStream, log, now, maxHistory, busyTimeoutMs, onHangup });
+  constructor({ voice, ask, askStream = null, log = () => {}, now = () => Date.now(), maxHistory = 16, busyTimeoutMs = 30000, onHangup = null, onEvent = () => {} }) {
+    Object.assign(this, { voice, ask, askStream, log, now, maxHistory, busyTimeoutMs, onHangup, onEvent });
     this.sessions = new Map();
     this.pending = new Map();
     this.controllers = new Map();
+  }
+
+  // D-3：通话接入完整事件流。一次通话轮次发 message_received / message_replied，
+  // 由调用方（connect/server.mjs）落进 agent_events。事件记录绝不影响通话本身。
+  emitEvent(event) {
+    try { this.onEvent(event); } catch {}
   }
 
   session(id) {
@@ -86,6 +92,7 @@ export class CallService {
       const text = String(transcript.text ?? '').trim();
       if (!text) throw new Error('voice_not_understood');
       hooks.onTranscript?.(text);
+      this.emitEvent({ eventType: 'message_received', sessionId: id, text });
       const history = session.history.slice(-this.maxHistory);
       // 豆包式流水线：文字一出就按句合成，第一句话先出声，不等整段。
       if (this.askStream && typeof this.voice.streamSynthesize === 'function') {
@@ -120,6 +127,7 @@ export class CallService {
         session.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
         session.history = session.history.slice(-this.maxHistory);
         if (wantsHangup) setTimeout(() => { try { this.onHangup?.(); } catch {} }, 1800);
+        this.emitEvent({ eventType: 'message_replied', sessionId: id, text, reply });
         return { transcript: text, reply, streamed: true, pipelined: true };
       }
       let reply = String(await this.ask({ text, history })).trim();
@@ -134,8 +142,9 @@ export class CallService {
       }
       session.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
       session.history = session.history.slice(-this.maxHistory);
-      if (streamed) return { transcript: text, reply, streamed: true, duration_ms: streamed.duration_ms };
+      if (streamed) { this.emitEvent({ eventType: 'message_replied', sessionId: id, text, reply }); return { transcript: text, reply, streamed: true, duration_ms: streamed.duration_ms }; }
       const audio = await this.voice.synthesize(audioId, reply, undefined, { silk: false });
+      this.emitEvent({ eventType: 'message_replied', sessionId: id, text, reply });
       return { transcript: text, reply, streamed: false, audio: audio.file.toString('base64'), mime: 'audio/mp4', duration_ms: audio.duration_ms };
     } finally {
       this.controllers.delete(id);

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 /**
  * 自媒体互动合规闸门（依据 /Users/zhang/Desktop/抖音规则.md 整理）
  * 三级：allow（L1 自动） / draft（L2 转人工） / block（L3 阻止）
@@ -10,6 +13,43 @@ export const LIMITS = {
   minIntervalMs: 90_000,  // 两条评论最小间隔
   duplicateWindowMs: 24 * 60 * 60 * 1000,
 };
+
+/**
+ * 允许用 `runtime/douyin/limits.json` 覆盖上面几个数字（只覆盖评论频次相关的）。
+ * 主人想放宽/收紧时改文件即可，不用改代码；文件不存在就用默认值。
+ */
+export function loadLimits(root = process.cwd()) {
+  const merged = { ...LIMITS };
+  try {
+    const raw = JSON.parse(readFileSync(join(root, 'runtime', 'douyin', 'limits.json'), 'utf8'));
+    for (const key of ['maxLength', 'dailyComments', 'hourlyComments', 'minIntervalMs', 'duplicateWindowMs']) {
+      const value = Number(raw?.[key]);
+      if (Number.isFinite(value) && value > 0) merged[key] = value;
+    }
+    return { ...merged, source: 'runtime/douyin/limits.json' };
+  } catch {
+    return { ...merged, source: 'default' };
+  }
+}
+
+/** 当前频次用量：今天/这一小时各发了多少、下一条最早什么时候能发。 */
+export function quotaOf(history = [], { now = Date.now(), limits = LIMITS } = {}) {
+  const hour = (history ?? []).filter((item) => now - item.at < 3600_000);
+  const todayKey = new Date(now).toLocaleDateString('sv-SE');
+  const today = (history ?? []).filter((item) => new Date(item.at).toLocaleDateString('sv-SE') === todayKey);
+  const lastAt = (history ?? []).at(-1)?.at ?? 0;
+  const waitMs = lastAt ? Math.max(0, limits.minIntervalMs - (now - lastAt)) : 0;
+  return {
+    hourlyUsed: hour.length,
+    hourlyCap: limits.hourlyComments,
+    hourlyLeft: Math.max(0, limits.hourlyComments - hour.length),
+    dailyUsed: today.length,
+    dailyCap: limits.dailyComments,
+    dailyLeft: Math.max(0, limits.dailyComments - today.length),
+    waitMs,
+    source: limits.source ?? 'default',
+  };
+}
 
 const BLOCK_RULES = [
   { id: 'BF001', name: '违法犯罪', patterns: [/毒品|枪械|代开|洗钱|办证|刷单|博彩|赌博|赌场|黄牛|代抢|外挂/u] },
@@ -49,6 +89,7 @@ export function checkComment(text, { recentTexts = [], lastCommentAt = 0, todayC
   if (PRICE.test(body)) return { ok: false, level: 'draft', id: 'price', reason: '涉及价格/优惠，需要人工确认' };
   if (recentTexts.some((item) => item.trim() === body)) return { ok: false, level: 'block', id: 'duplicate', reason: '24 小时内发过一样的评论' };
   if (todayCount >= LIMITS.dailyComments) return { ok: false, level: 'draft', id: 'daily_cap', reason: `今天已发 ${todayCount} 条，达到上限` };
+  if (hourCount >= LIMITS.hourlyComments) return { ok: false, level: 'draft', id: 'hourly_cap', reason: `这一小时已发 ${hourCount} 条，达到上限` };
   if (lastCommentAt && now - lastCommentAt < LIMITS.minIntervalMs) {
     return { ok: false, level: 'draft', id: 'too_fast', reason: '距上一条评论不足 90 秒' };
   }

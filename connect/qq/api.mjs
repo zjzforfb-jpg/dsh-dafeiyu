@@ -91,6 +91,14 @@ export class QqApi {
     return this.call('POST', `${conversationPath(kind, id)}/files`, body);
   }
 
+  /** 发一张图片（QQ 官方富媒体：file_type 1 上传后按 msg_type 7 引用）。 */
+  async sendImage({ kind, id, file, fileName = 'image.jpg', msgId }) {
+    const uploaded = await this.uploadMedia({ kind, id, fileType: 1, file, fileName, srvSendMsg: false });
+    const fileInfo = uploaded.file_info ?? uploaded.file_uuid;
+    if (typeof fileInfo !== 'string' || !fileInfo) throw new Error('qq_upload_rejected');
+    return this.call('POST', `${conversationPath(kind, id)}/messages`, { content: '', msg_type: 7, media: { file_info: fileInfo }, ...(msgId ? { msg_id: msgId } : {}) });
+  }
+
   async sendVoice({ kind, id, silk, fileName = 'voice.silk', msgId }) {
     const uploaded = await this.uploadMedia({ kind, id, fileType: 3, file: silk, fileName, srvSendMsg: false });
     const fileInfo = uploaded.file_info ?? uploaded.file_uuid;

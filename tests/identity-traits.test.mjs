@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict'; import {test} from 'node:test'; import {DatabaseSync} from 'node:sqlite'; import {addTraitEvidence,listIdentityTraits} from '../brain/identity-traits.mjs';
+test('后天特征需要多次证据才激活',()=>{const db=new DatabaseSync(':memory:');for(let i=0;i<3;i++)addTraitEvidence(db,{traitKey:'voice.soft',content:'偏好软萌声音',weight:.4});assert.equal(listIdentityTraits(db)[0].status,'active');db.close();});

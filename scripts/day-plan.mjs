@@ -49,12 +49,12 @@ const caption = `今天心情：${plan.mood}\n${plan.reason ? `想法：${plan.r
 console.log(JSON.stringify(plan, null, 2));
 if (!has('ask')) process.exit(0);
 
-const sent = await sendApprovalRequest({ root, target: '大肥鱼小可爱', title: '今天的计划', caption, note: '同意我就照这个来，不行你直接说想改哪条。' });
-const result = await waitApproval({ root, sinceMs: sent.sentAt, timeoutMs: 15 * 60_000 });
+const sent = await sendApprovalRequest({ root, target: '大肥鱼小可爱', title: '今天的计划', caption, note: '同意我就照这个来，不行你直接说想改哪条。', operations: plan.steps });
+const result = await waitApproval({ root, requestId: sent.requestId, timeoutMs: 15 * 60_000 });
 if (!result?.approved) { console.log(JSON.stringify({ approved: false })); process.exit(1); }
 console.log(JSON.stringify({ approved: true, reply: result.text }));
 if (!has('run')) process.exit(0);
 
-const stored = addPlan(root, { steps: plan.steps.map((name) => ({ name })), origin: 'day-plan', title: '每日计划' });
+const stored = addPlan(root, { steps: plan.steps.map((name) => ({ name })), origin: 'day-plan', title: '每日计划', approvalRequestId: sent.requestId });
 const done = await runPlan(root, stored, { log: (line) => console.log(line) });
 console.log(JSON.stringify(done));

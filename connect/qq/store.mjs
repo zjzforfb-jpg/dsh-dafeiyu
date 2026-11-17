@@ -1,3 +1,6 @@
+import { ensureColumns } from '../core/migrations.mjs';
+import { budgetUsage, reserve as reserveBudget } from '../core/budget.mjs';
+
 export function initQq(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS qq_peers(
       conv_kind TEXT NOT NULL, conv_id TEXT NOT NULL, label TEXT,
@@ -13,8 +16,17 @@ export function initQq(db) {
       conv_kind TEXT NOT NULL, conv_id TEXT NOT NULL, member_id TEXT NOT NULL, label TEXT NOT NULL,
       seen_ms INTEGER NOT NULL, PRIMARY KEY(conv_kind, conv_id, member_id));
     UPDATE qq_messages SET status='unknown', error='restart_interrupted' WHERE status IN ('transcribing','synthesizing','sending');`);
-  const columns = db.prepare('PRAGMA table_info(qq_messages)').all();
-  if (!columns.some(column => column.name === 'author')) db.exec('ALTER TABLE qq_messages ADD COLUMN author TEXT');
+  ensureColumns(db, 'qq_messages', ['author']);
+  ensureColumns(db, 'qq_peers', ['role']);
+}
+
+export function syncQqOwner(db, ownerId) {
+  initQq(db);
+  const valid = typeof ownerId === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(ownerId);
+  db.prepare("UPDATE qq_peers SET role='friend' WHERE role='owner'").run();
+  if (valid) {
+    db.prepare("UPDATE qq_peers SET role='owner' WHERE conv_kind='c2c' AND conv_id=?").run(ownerId);
+  }
 }
 
 function validKind(kind) {
@@ -31,11 +43,11 @@ export function savePeer(db, { kind, id, label, enabled = true, autoReply = true
 }
 
 export function peer(db, kind, id) {
-  return db.prepare('SELECT conv_kind AS kind, conv_id AS id, label, enabled, auto_reply AS autoReply, voice_reply AS voiceReply FROM qq_peers WHERE conv_kind=? AND conv_id=?').get(kind, id) ?? null;
+  return db.prepare('SELECT conv_kind AS kind, conv_id AS id, label, role, enabled, auto_reply AS autoReply, voice_reply AS voiceReply FROM qq_peers WHERE conv_kind=? AND conv_id=?').get(kind, id) ?? null;
 }
 
 export function peers(db) {
-  return db.prepare('SELECT conv_kind AS kind, conv_id AS id, label, enabled, auto_reply AS autoReply, voice_reply AS voiceReply FROM qq_peers ORDER BY kind, id').all();
+  return db.prepare('SELECT conv_kind AS kind, conv_id AS id, label, role, enabled, auto_reply AS autoReply, voice_reply AS voiceReply FROM qq_peers ORDER BY kind, id').all();
 }
 
 export function logInbound(db, { id, kind, convId, msgId, inputKind, text, createdMs, author = null }) {
@@ -85,13 +97,17 @@ export function dayKey(now) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
 }
 
+/**
+ * D-2：QQ 的日配额并入统一预算（connect/core/budget.mjs 的 daily_budget）。
+ * QQ 与 iLink、life 占用的是同一格累计——不再各记各的。
+ * limit 是可选的调用方自设封顶（与统一上限取更小值），老调用点语义不变。
+ */
 export function reserve(db, day, column, limit) {
   if (!['model_calls', 'voice_requests'].includes(column)) throw new Error('invalid_qq_budget');
-  db.prepare('INSERT OR IGNORE INTO qq_usage(day) VALUES(?)').run(day);
-  return db.prepare(`UPDATE qq_usage SET ${column}=${column}+1 WHERE day=? AND ${column}<?`).run(day, limit).changes > 0;
+  return reserveBudget(db, day, column, limit ?? null);
 }
 
 export function usage(db, day) {
-  const row = db.prepare('SELECT * FROM qq_usage WHERE day=?').get(day);
-  return { day, model_calls: row?.model_calls ?? 0, voice_requests: row?.voice_requests ?? 0 };
+  const row = budgetUsage(db, day);
+  return { day, model_calls: row.model_calls ?? 0, voice_requests: row.voice_requests ?? 0 };
 }

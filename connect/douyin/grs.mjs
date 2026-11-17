@@ -4,6 +4,7 @@
  * 参考图走 images 字段（本地文件转 data URI），用于锁角色一致性。
  */
 import { execFileSync } from 'node:child_process';
+import { runtimeDir } from '../core/paths.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 
@@ -11,7 +12,7 @@ const DEFAULT_BASE = 'https://grsai.dakka.com.cn';
 const CHAIN = ['nano-banana-2.1', 'gpt-image-2.6-flare'];
 
 export function loadImageConfig(root = process.cwd()) {
-  const file = join(root, 'runtime', 'douyin', 'image.json');
+  const file = join(runtimeDir(root), 'douyin', 'image.json');
   let cfg = {};
   try { cfg = JSON.parse(readFileSync(file, 'utf8')); } catch { /* 允许纯环境变量 */ }
   const apiKey = cfg.apiKey ?? process.env.GRSAI_API_KEY;
@@ -73,7 +74,7 @@ export async function generateImageGrs(prompt, { root = process.cwd(), refs = []
   for (const model of chain) {
     try {
       const { bytes } = await runModel(cfg, model, prompt, refs, aspectRatio);
-      const file = join(root, 'runtime', 'douyin', 'images', `grs-${Date.now()}.png`);
+      const file = join(runtimeDir(root), 'douyin', 'images', `grs-${Date.now()}.png`);
       mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
       writeFileSync(file, bytes, { mode: 0o600 });
       return { file, bytes: bytes.length, model, prompt, attempts: errors.length + 1 };

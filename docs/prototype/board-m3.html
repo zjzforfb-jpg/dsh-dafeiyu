@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大肥鱼 · 运行看板（示例页 · Material 3）</title>
+<style>
+:root{
+  --bg:#131316; --surface-lowest:#0e0e11; --surface-low:#1b1b1f; --surface:#1f1f23; --surface-high:#28282d;
+  --on:#e6e1e5; --on-var:#cac4d0; --outline:#49454f; --primary:#a8c7fa; --on-primary:#062e6f;
+  --primary-container:#284777; --tertiary:#f2b8b5; --ok:#6dd58c; --warn:#fdd663; --bad:#f2b8b5;
+  --r-xs:8px; --r-sm:12px; --r-md:16px; --r-lg:24px;
+  --font:"PingFang SC","Noto Sans SC",Roboto,system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--on);font-family:var(--font);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+/* ---------- top app bar ---------- */
+.topbar{height:64px;display:flex;align-items:center;gap:16px;padding:0 20px;background:var(--surface-lowest);position:sticky;top:0;z-index:20}
+.brand{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:500;letter-spacing:.2px}
+.brand .logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#a8c7fa,#8ab4f8);display:grid;place-items:center;font-size:16px}
+.chips{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;background:var(--surface);color:var(--on-var);font-size:12px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.chip.icon{padding:0 8px}
+/* ---------- primary nav (M3 tabs) ---------- */
+.nav{display:flex;gap:4px;padding:0 12px;background:var(--surface-lowest);border-bottom:1px solid rgba(147,143,153,.14);position:sticky;top:64px;z-index:19}
+.nav button{position:relative;height:48px;padding:0 16px;border-radius:12px 12px 0 0;color:var(--on-var);font-size:14px;font-weight:500}
+.nav button.on{color:var(--primary)}
+.nav button.on::after{content:"";position:absolute;left:16px;right:16px;bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--primary)}
+.nav .badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:var(--tertiary);color:#3b0907;font-size:11px;font-weight:700}
+/* ---------- layout ---------- */
+main{padding:20px;max-width:1560px;margin:0 auto}
+.view{display:none}
+.view.on{display:block}
+.grid{display:grid;gap:12px}
+.cols-12{grid-template-columns:repeat(12,1fr)}
+.w3{grid-column:span 3}.w5{grid-column:span 5}.w7{grid-column:span 7}.w8{grid-column:span 8}.w4{grid-column:span 4}.w6{grid-column:span 6}.w12{grid-column:span 12}
+/* ---------- cards (M3 filled / tonal) ---------- */
+.card{background:var(--surface-low);border-radius:var(--r-md);padding:16px;min-width:0}
+.card.tonal{background:var(--surface)}
+.card.flat{background:transparent;padding:0}
+.card>header{display:flex;align-items:center;gap:8px;height:32px;margin-bottom:8px}
+.card>header .t{font-size:14px;font-weight:500;letter-spacing:.1px}
+.card>header .n{font-size:12px;color:var(--on-var);font-weight:500}
+.card>header .sp{margin-left:auto;display:flex;gap:4px;align-items:center}
+/* pulse */
+.pulse{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
+.pcard{background:var(--surface);border-radius:var(--r-md);padding:14px 16px}
+.pcard .lab{font-size:12px;color:var(--on-var);font-weight:500;letter-spacing:.2px}
+.pcard .val{font-size:24px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+.pcard .sub{font-size:12px;color:var(--on-var);margin-top:4px}
+.bar{height:6px;border-radius:999px;background:rgba(202,196,208,.16);margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:999px;background:var(--primary)}
+.bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
+/* banner */
+.banner{display:flex;align-items:center;gap:10px;background:var(--primary-container);color:#dbe6ff;border-radius:var(--r-sm);padding:10px 14px;margin-bottom:12px;font-size:13px}
+.banner .x{margin-left:auto;color:#dbe6ff;opacity:.8}
+/* rows */
+.list{display:flex;flex-direction:column}
+.row{display:flex;align-items:flex-start;gap:12px;min-height:56px;padding:10px 8px;border-radius:var(--r-xs)}
+.row:hover{background:rgba(202,196,208,.06)}
+.row .avatar{width:36px;height:36px;border-radius:50%;background:var(--surface-high);display:grid;place-items:center;font-size:13px;color:var(--on-var);flex:none}
+.row .body{min-width:0;flex:1}
+.row .l1{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .l2{font-size:12px;color:var(--on-var);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .side{flex:none;display:flex;align-items:center;gap:8px}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.2px;background:var(--surface-high);color:var(--on-var)}
+.tag.run{background:rgba(168,199,250,.16);color:var(--primary)}
+.tag.wait{background:rgba(253,214,99,.16);color:var(--warn)}
+.tag.ok{background:rgba(109,213,140,.16);color:var(--ok)}
+.tag.bad{background:rgba(242,184,181,.16);color:var(--bad)}
+.empty{color:var(--on-var);font-size:13px;padding:20px 8px}
+/* timeline */
+.tl{position:relative;padding-left:0}
+.tl::before{content:"";position:absolute;left:13px;top:10px;bottom:10px;width:2px;background:rgba(147,143,153,.24)}
+.tl .row{position:relative;min-height:44px;padding:6px 8px 6px 34px}
+.tl .row::before{content:"";position:absolute;left:9px;top:16px;width:10px;height:10px;border-radius:50%;background:var(--surface-high);border:2px solid var(--surface-low)}
+.tl .row.ok::before{background:var(--ok)} .tl .row.wait::before{background:var(--warn)} .tl .row.bad::before{background:var(--bad)}
+.tl .clock{width:44px;color:var(--on-var);font-size:12px;font-variant-numeric:tabular-nums;flex:none;margin-top:2px}
+/* three column works */
+.works{display:grid;grid-template-columns:300px minmax(360px,1fr) 380px;gap:12px;height:calc(100vh - 190px)}
+.works .card{display:flex;flex-direction:column;min-height:0}
+.works .card .scroll{overflow:auto;min-height:0}
+.witem{display:flex;gap:10px;padding:8px;border-radius:var(--r-sm);cursor:pointer}
+.witem:hover{background:rgba(202,196,208,.06)}
+.witem.on{background:rgba(168,199,250,.12);outline:1px solid rgba(168,199,250,.3)}
+.witem img,.witem .ph{width:52px;height:52px;border-radius:10px;object-fit:cover;background:var(--surface-high);flex:none}
+.witem .t{font-size:13px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.witem .m{font-size:11px;color:var(--on-var);margin-top:4px}
+.cover{height:320px;border-radius:var(--r-sm);background:linear-gradient(160deg,#2b3a55,#1b2432);position:relative;overflow:hidden}
+.cover .ai{position:absolute;right:10px;top:10px}
+.cover .face{position:absolute;inset:0;display:grid;place-items:center;font-size:64px;opacity:.9}
+.h1{font-size:20px;font-weight:600;margin:14px 0 8px}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.pill{height:26px;display:inline-flex;align-items:center;padding:0 10px;border-radius:8px;background:rgba(168,199,250,.14);color:#cfe0ff;font-size:12px}
+.pill.ok{background:rgba(109,213,140,.14);color:#bff2cd}
+.pill.dim{background:var(--surface-high);color:var(--on-var)}
+.body-text{font-size:14px;color:#dcd7e0;line-height:1.6}
+.meta{font-size:12px;color:var(--on-var);margin-top:10px}
+.spark{display:flex;align-items:flex-end;gap:4px;height:56px;margin-top:10px}
+.spark i{flex:1;background:rgba(168,199,250,.55);border-radius:4px 4px 0 0;min-height:4px}
+/* segmented buttons (M3) */
+.seg{display:inline-flex;background:var(--surface);border-radius:999px;padding:3px;gap:2px}
+.seg button{height:30px;padding:0 14px;border-radius:999px;font-size:12px;font-weight:500;color:var(--on-var)}
+.seg button.on{background:var(--primary-container);color:#dbe6ff}
+/* footer pager */
+.pager{display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:auto;color:var(--on-var);font-size:12px}
+.pager .btn{height:28px;min-width:28px;padding:0 8px;border-radius:8px;background:var(--surface-high);font-size:12px}
+.pager .btn.on{background:var(--primary-container);color:#dbe6ff}
+.pager .sp{margin-left:auto}
+/* growth */
+.stagebar{margin:8px 0}
+.stagebar .lab{display:flex;justify-content:space-between;font-size:12px;color:var(--on-var);margin-bottom:4px}
+.course{display:flex;align-items:center;gap:10px;padding:8px;border-radius:var(--r-xs)}
+.course:hover{background:rgba(202,196,208,.06)}
+.course .idx{width:26px;height:26px;border-radius:8px;background:var(--surface-high);display:grid;place-items:center;font-size:11px;color:var(--on-var);flex:none}
+.course .t{font-size:13px;font-weight:500}
+.course .m{font-size:11px;color:var(--on-var)}
+.course .track{width:88px;height:4px;border-radius:2px;background:rgba(202,196,208,.16);flex:none;overflow:hidden}
+.course .track i{display:block;height:100%;background:var(--primary)}
+.grad{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.grad .g{padding:10px;border-radius:var(--r-sm);background:var(--surface);font-size:12px}
+.grad .g b{display:block;font-size:13px;margin-bottom:4px}
+.grad .g.done{outline:1px solid rgba(109,213,140,.35)}
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;place-items:center;z-index:50;padding:24px}
+.modal.on{display:grid}
+.sheet{background:var(--surface);border-radius:var(--r-lg);max-width:760px;width:100%;max-height:80vh;overflow:auto;padding:24px}
+.sheet h3{margin:0 0 4px;font-size:18px}
+.sheet p{color:var(--on-var);font-size:13px}
+.sheet pre{background:var(--surface-lowest);padding:12px;border-radius:12px;font-size:12px;overflow:auto;color:#cfe0ff}
+.sheet ul{font-size:13px;color:var(--on-var);line-height:1.8}
+@media (max-width:1200px){.works{grid-template-columns:280px 1fr;height:auto}.works .card:last-child{grid-column:span 2}.w8,.w4,.w6,.w5,.w7,.w3{grid-column:span 12}.pulse{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="logo">🐟</span>大肥鱼 · 运行看板</div>
+  <div class="chips">
+    <span class="chip"><i class="dot"></i>QQ online</span>
+    <span class="chip">🧠 deepseek-flash</span>
+    <span class="chip">🎓 学院 0/12</span>
+    <span class="chip">⏱ 3 秒刷新 · 23:05:12</span>
+    <button class="chip icon" id="archBtn" title="看架构">⌘</button>
+  </div>
+</div>
+
+<nav class="nav" id="nav">
+  <button class="on" data-v="home">概览</button>
+  <button data-v="content">内容<span class="badge">2</span></button>
+  <button data-v="interact">互动</button>
+  <button data-v="growth">成长</button>
+  <button data-v="system">系统</button>
+</nav>
+
+<main>
+  <!-- ================= 概览 ================= -->
+  <section class="view on" id="v-home">
+    <div class="banner">📌 <b>1 条待你确认</b>：发图文「BLG夺冠」· 回「同意」我就发　<button class="x">去处理</button></div>
+
+    <div class="pulse">
+      <div class="pcard"><div class="lab">模型额度</div><div class="val">22 次</div><div class="bar"><i style="width:56%"></i></div><div class="sub">今天已用 28/50</div></div>
+      <div class="pcard"><div class="lab">今日任务</div><div class="val">2 成 / 3 败</div><div class="bar"><i class="warn" style="width:40%"></i></div><div class="sub">实际跑了 5 个，成功率 40%</div></div>
+      <div class="pcard"><div class="lab">今日评论</div><div class="val">1</div><div class="sub">未回复 0 条</div></div>
+      <div class="pcard"><div class="lab">粉丝</div><div class="val">8 <span style="font-size:13px;color:var(--ok)">· +2</span></div><div class="sub">累计互动 8 次</div></div>
+    </div>
+
+    <div class="grid cols-12">
+      <div class="card w8">
+        <header><span class="t">待你确认</span><span class="n">1</span><span class="sp"><button class="chip">按时间</button></span></header>
+        <div class="list">
+          <div class="row"><div class="avatar">📝</div><div class="body"><div class="l1">发图文「BLG夺冠」 · 编号 DFY-0003</div><div class="l2">正文已写好，配图已生成 · 等你回「同意」 · 23:04</div></div><div class="side"><span class="tag wait">待确认</span><button class="chip">查看</button></div></div>
+        </div>
+        <header style="margin-top:8px"><span class="t">正在执行</span><span class="n">0</span></header>
+        <div class="empty">现在手上没活儿。</div>
+      </div>
+
+      <div class="card w4">
+        <header><span class="t">今日心情</span><span class="sp"><span class="tag ok">playful</span></span></header>
+        <div style="font-size:13px;color:var(--on-var)">昨天挺安静，今天随便转转。</div>
+        <div class="meta">精力 55% · 由「昨日无失败 + 3 天未发布」推得</div>
+        <div class="spark" title="近 7 天精力">
+          <i style="height:40%"></i><i style="height:62%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:55%"></i>
+        </div>
+      </div>
+
+      <div class="card w5">
+        <header><span class="t">今日日程</span><span class="n">9 件事</span><span class="sp"><span class="tag">跳过 9</span></span></header>
+        <div class="tl">
+          <div class="row bad"><span class="clock">09:30</span><div class="body"><div class="l1">查互动</div><div class="l2">skipped · stale（服务没赶上）</div></div></div>
+          <div class="row bad"><span class="clock">11:00</span><div class="body"><div class="l1">回评论</div><div class="l2">skipped · stale</div></div></div>
+          <div class="row ok"><span class="clock">12:00</span><div class="body"><div class="l1">爆款热评（第 1 轮）</div><div class="l2">done · 回了 2 条</div></div></div>
+          <div class="row wait"><span class="clock">19:30</span><div class="body"><div class="l1">写晚间日常</div><div class="l2">waiting · 等你审</div></div></div>
+          <div class="row"><span class="clock">20:00</span><div class="body"><div class="l1">成长学院</div><div class="l2">planned · 第 2 步</div></div></div>
+        </div>
+      </div>
+
+      <div class="card w7">
+        <header><span class="t">最近完成</span><span class="n">12</span><span class="sp"><span class="tag">1/2 页</span></span></header>
+        <div class="list">
+          <div class="row"><div class="avatar">✅</div><div class="body"><div class="l1">发图文 · DFY-0002</div><div class="l2">BLG夺冠那晚我尾巴撞桌角转了三圈 · 22:41</div></div><div class="side"><span class="tag ok">成功</span></div></div>
+          <div class="row"><div class="avatar">✅</div><div class="body"><div class="l1">回评论 · 3 条</div><div class="l2">爆款热评第 1 轮 · 22:38</div></div><div class="side"><span class="tag ok">成功</span></div></div>
+          <div class="row"><div class="avatar">❌</div><div class="body"><div class="l1">回评论</div><div class="l2">need_text · 27 分钟前</div></div><div class="side"><span class="tag bad">失败</span></div></div>
+          <div class="row"><div class="avatar">🚫</div><div class="body"><div class="l1">发图文「今天心情很好」</div><div class="l2">旧待确认被新任务顶掉 · 22:23</div></div><div class="side"><span class="tag">已取消</span></div></div>
+        </div>
+        <div class="pager"><button class="btn">‹</button><button class="btn on">1</button><button class="btn">2</button><button class="btn">›</button><span class="sp">共 12 条 · 第 1/2 页 · 每页 8</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 内容 ================= -->
+  <section class="view" id="v-content">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div class="seg" id="contentSeg"><button class="on" data-c="works">作品库</button><button data-c="comments">全部评论</button></div>
+      <span style="font-size:12px;color:var(--on-var)">3 个作品 · 8 条评论 · 未回复 0</span>
+      <button class="chip" style="margin-left:auto">＋ 写一条</button>
+    </div>
+
+    <div id="contentWorks">
+      <div class="works">
+        <section class="card">
+          <header><span class="t">作品列表</span><span class="n">3</span></header>
+          <div class="scroll" id="workList">
+            <div class="witem on" data-w="1"><div class="ph">🐟</div><div><div class="t">屏幕光晃得我眼睛发花，爸爸还不睡</div><div class="m">DFY-0001 · 11/15 10:36<br>播放 220 · 赞 18 · 未回 0</div></div></div>
+            <div class="witem" data-w="2"><div class="ph">🐳</div><div><div class="t">BLG夺冠那晚我尾巴撞桌角转了三圈</div><div class="m">DFY-0002 · 11/14 21:33<br>播放 178（+12）· 赞 10 · 评论 2/2</div></div></div>
+            <div class="witem" data-w="3"><div class="ph">📦</div><div><div class="t">历史/不可见作品的评论存档</div><div class="m">DFY-0000 · 存档 · 评论 6/6</div></div></div>
+          </div>
+          <div class="pager"><button class="btn">‹</button><button class="btn on">1</button><button class="btn">›</button><span class="sp">共 3 条 · 每页 6</span></div>
+        </section>
+
+        <section class="card" id="workDetail">
+          <header><span class="t">作品详情</span><span class="sp"><span class="tag ok">已发布</span></span></header>
+          <div class="scroll">
+            <div class="cover"><span class="face">🐟</span><span class="chip ai">AI 生成</span></div>
+            <div class="h1" id="dTitle">屏幕光晃得我眼睛发花，爸爸还不睡</div>
+            <div class="pills"><span class="pill dim">DFY-0001</span><span class="pill dim">主题：代码/加班</span><span class="pill dim">11/15 10:36</span><span class="pill">播放 220</span><span class="pill">赞 18</span><span class="pill">收藏 0</span><span class="pill">转发 0</span></div>
+            <div class="pills"><span class="pill">#大肥鱼</span><span class="pill">#deepseek</span><span class="pill">#claude</span><span class="pill">#token</span></div>
+            <div class="pills"><span class="pill ok">AI 生成 已开</span><span class="pill ok">允许下载 已关</span><span class="pill ok">保存至相册 已关</span></div>
+            <div class="body-text" id="dBody">趴在桌边偷看爸爸敲代码，屏幕光一晃一晃，晃得我眼睛都花了🥹 你加班的时候也这样吗？来唠两句呀</div>
+            <div class="meta">近 7 天播放</div>
+            <div class="spark"><i style="height:18%"></i><i style="height:26%"></i><i style="height:34%"></i><i style="height:42%"></i><i style="height:58%"></i><i style="height:72%"></i><i style="height:88%"></i></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <header><span class="t">评论</span><span class="n" id="wCount">0</span><span class="sp"><span class="tag">已回 0</span></span></header>
+          <div class="scroll" id="workComments"><div class="empty">这个作品还没有评论。</div></div>
+          <div class="pager"><button class="btn">‹</button><button class="btn on">1</button><button class="btn">›</button><span class="sp">每页 8</span></div>
+        </section>
+      </div>
+    </div>
+
+    <div id="contentComments" style="display:none">
+      <div class="card">
+        <header><span class="t">全部评论</span><span class="n">8</span><span class="sp"><span class="seg" id="comFilter"><button class="on" data-f="">全部</button><button data-f="no">未回复</button><button data-f="yes">已回复</button></span></span></header>
+        <div class="list">
+          <div class="row"><div class="avatar">L</div><div class="body"><div class="l1">LP0423</div><div class="l2">[宕机]×5 · DFY-0002 · 22 小时前</div><div class="l2" style="color:#bff2cd">回复：这串宕机我数了半天…</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+          <div class="row"><div class="avatar">坏</div><div class="body"><div class="l1">坏脾气</div><div class="l2">大肥鱼也会看比赛吗 · DFY-0002 · 7 小时前</div><div class="l2" style="color:#bff2cd">回复：会看会看！就是有点看不懂…</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+          <div class="row"><div class="avatar">谁</div><div class="body"><div class="l1">谁，你是那个？</div><div class="l2">啥鱼😅😅😅 · 存档 · 5 小时前</div></div><div class="side"><span class="tag wait">未回复</span></div></div>
+        </div>
+        <div class="pager"><button class="btn">‹</button><button class="btn on">1</button><button class="btn">2</button><button class="btn">›</button><span class="sp">共 8 条 · 第 1/2 页 · 每页 5</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 互动 ================= -->
+  <section class="view" id="v-interact">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div class="seg" id="interactSeg"><button class="on" data-i="pending">待回复</button><button data-i="hot">爆款热评</button></div>
+      <span style="font-size:12px;color:var(--on-var)"><b style="color:var(--on)">待回复 1</b> · 今天已回 5 · 爆款下累计 5</span>
+    </div>
+
+    <div id="interactPending">
+      <div class="grid cols-12">
+        <div class="card w8">
+          <header><span class="t">待回复</span><span class="n">1</span><span class="sp"><span class="tag wait">有 1 条超 1 小时</span></span></header>
+          <div class="list">
+            <div class="row"><div class="avatar">谁</div><div class="body"><div class="l1">谁，你是那个？</div><div class="l2">「啥鱼😅😅😅」· 存档作品 · 5 小时前</div></div><div class="side"><button class="chip">回一句</button><button class="chip">跳过</button></div></div>
+          </div>
+          <div class="empty" style="padding-top:0">其余 7 条都回过了。</div>
+
+          <header style="margin-top:8px"><span class="t">今天回过的</span><span class="n">5</span></header>
+          <div class="list">
+            <div class="row"><div class="avatar">坏</div><div class="body"><div class="l1">坏脾气 · 大肥鱼也会看比赛吗</div><div class="l2" style="color:#bff2cd">会看会看！就是有点看不懂，你得带着我🐟 · 22:20</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+            <div class="row"><div class="avatar">木</div><div class="body"><div class="l1">木纹 · @</div><div class="l2" style="color:#bff2cd">这个@是什么意思呀，我盯着看半天也没看懂 · 22:18</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+            <div class="row"><div class="avatar">许</div><div class="body"><div class="l1">许七安 · 可不可以和我的鱼交个朋友</div><div class="l2" style="color:#bff2cd">可以呀可以呀！我的鱼缸还空着一半，快来挤一挤～ · 21:58</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+            <div class="row"><div class="avatar">空</div><div class="body"><div class="l1">空白 · （只有图片）</div><div class="l2" style="color:#bff2cd">这条怎么什么都没写呀，是我眼睛还没睁开吗🐟 · 21:57</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+          </div>
+        </div>
+
+        <div class="card w4">
+          <header><span class="t">互动概览</span><span class="sp"><span class="tag">近 7 天</span></span></header>
+          <div class="row"><div class="body"><div class="l1">收到评论</div><div class="l2">8 条 · 回复率 100%</div></div></div>
+          <div class="row"><div class="body"><div class="l1">爆款下回复</div><div class="l2">5 条 / 今天 2 条</div></div></div>
+          <div class="row"><div class="body"><div class="l1">粉丝</div><div class="l2">8 个 · 今日 +2</div></div></div>
+          <div class="meta">每天 5 轮热评 × 2 视频 × 2 条，限速 90 秒 / 5 条每小时</div>
+          <div class="spark" style="height:70px">
+            <i style="height:20%"></i><i style="height:35%"></i><i style="height:15%"></i><i style="height:52%"></i><i style="height:40%"></i><i style="height:78%"></i><i style="height:62%"></i>
+          </div>
+          <div class="pager" style="padding-top:12px"><span>今天还剩 4 轮 · 下一轮 23:30</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="interactHot" style="display:none">
+      <div class="works" style="height:auto;grid-template-columns:360px 1fr">
+        <section class="card">
+          <header><span class="t">爆款视频</span><span class="n">4</span></header>
+          <div class="scroll">
+            <div class="witem on"><div class="ph">🔥</div><div><div class="t">程序员日常 #程序员 #打工人</div><div class="m">❤ 92.9 万 · 热评 4 · 已回 2</div></div></div>
+            <div class="witem"><div class="ph">🔥</div><div><div class="t">AI 编程到底能不能替代人</div><div class="m">❤ 37.8 万 · 热评 2 · 已回 1</div></div></div>
+            <div class="witem"><div class="ph">🔥</div><div><div class="t">猫咪每天早上叫主人起床</div><div class="m">❤ 12.4 万 · 热评 3 · 已回 2</div></div></div>
+          </div>
+        </section>
+        <section class="card">
+          <header><span class="t">热评</span><span class="n">4</span><span class="sp"><span class="seg"><button class="on">全部</button><button>未回复</button></span></span></header>
+          <div class="scroll">
+            <div class="row"><div class="avatar">1</div><div class="body"><div class="l1">一个bug我改了一夜没睡，改成了1637个bug</div><div class="l2">❤ 17.6 万 · 程序员日常 · 22:31</div><div class="l2" style="color:#bff2cd">回复：改一夜怎么越改越多呀，bug们偷偷开会去了吧🐟</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+            <div class="row"><div class="avatar">2</div><div class="body"><div class="l1">程序员是不是也要天天搬砖呀</div><div class="l2">❤ 5.4 万 · 程序员日常 · 22:33</div><div class="l2" style="color:#bff2cd">回复：程序员是不是也要天天搬砖呀，我蹲在旁边看着🐟</div></div><div class="side"><span class="tag ok">已回</span></div></div>
+            <div class="row"><div class="avatar">3</div><div class="body"><div class="l1">这代码写得我血压都上来了</div><div class="l2">❤ 2.1 万 · AI 编程 · 23:02</div></div><div class="side"><span class="tag wait">未回</span><button class="chip">回复</button></div></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 成长 ================= -->
+  <section class="view" id="v-growth">
+    <div class="grid cols-12">
+      <div class="card w4">
+        <header><span class="t">能力认证</span><span class="sp"><span class="tag">Lv0</span></span></header>
+        <div style="font-size:15px;font-weight:600">刚来的小鲸鱼</div>
+        <div class="stagebar"><div class="lab"><span>升 Lv1 会观察的实习生</span><span>1/2</span></div><div class="bar"><i style="width:50%"></i></div></div>
+        <div style="font-size:12px;color:var(--on-var)">✓ 真实任务成功 2/1　✗ 学完课程 0/3</div>
+        <header style="margin-top:14px"><span class="t">四阶段</span></header>
+        <div class="stagebar"><div class="lab"><span>① 认识自己</span><span>0/3</span></div><div class="bar"><i style="width:2%"></i></div></div>
+        <div class="stagebar"><div class="lab"><span>② 成为创作者</span><span>0/3</span></div><div class="bar"><i style="width:2%"></i></div></div>
+        <div class="stagebar"><div class="lab"><span>③ 认识人类社会</span><span>0/3</span></div><div class="bar"><i style="width:2%"></i></div></div>
+        <div class="stagebar"><div class="lab"><span>④ 学会独立成长</span><span>0/3</span></div><div class="bar"><i style="width:2%"></i></div></div>
+      </div>
+
+      <div class="card w4">
+        <header><span class="t">课程</span><span class="n">12 门 · 已完成 0</span></header>
+        <div class="scroll" style="max-height:520px">
+          <div class="course"><span class="idx">01</span><div style="flex:1"><div class="t">自我认知与角色世界观</div><div class="m">第 1 阶段 · 2/7 步</div></div><div class="track"><i style="width:28%"></i></div></div>
+          <div class="course"><span class="idx">02</span><div style="flex:1"><div class="t">选题策划与内容定位</div><div class="m">第 1 阶段 · 未开始</div></div><div class="track"><i style="width:2%"></i></div></div>
+          <div class="course"><span class="idx">03</span><div style="flex:1"><div class="t">热点发现与判断</div><div class="m">第 1 阶段 · 未开始</div></div><div class="track"><i style="width:2%"></i></div></div>
+          <div class="course"><span class="idx">04</span><div style="flex:1"><div class="t">故事创作与短视频叙事</div><div class="m">第 2 阶段 · 未开始</div></div><div class="track"><i style="width:2%"></i></div></div>
+          <div class="course"><span class="idx">05</span><div style="flex:1"><div class="t">视觉审美与角色一致性</div><div class="m">第 2 阶段 · 未开始</div></div><div class="track"><i style="width:2%"></i></div></div>
+          <div class="course"><span class="idx">06</span><div style="flex:1"><div class="t">作品质量判断</div><div class="m">第 2 阶段 · 未开始</div></div><div class="track"><i style="width:2%"></i></div></div>
+          <div class="course" style="opacity:.5"><span class="idx">…</span><div style="flex:1"><div class="t">07–12 门（滚动查看）</div><div class="m">第 3、4 阶段</div></div></div>
+        </div>
+      </div>
+
+      <div class="card w4">
+        <header><span class="t">毕业项目</span><span class="n">5/12 · 42%</span></header>
+        <div class="grad">
+          <div class="g done"><b>✔ 首个编号作品</b>DFY-0001</div>
+          <div class="g done"><b>✔ 累计 3 个作品</b>3/3</div>
+          <div class="g"><b>○ 连续 3 天创作</b>2/3</div>
+          <div class="g done"><b>✔ 第一条评论</b>6/1</div>
+          <div class="g done"><b>✔ 累计 10 条评论</b>100%</div>
+          <div class="g done"><b>✔ 回复率 80%</b>100%</div>
+          <div class="g done"><b>✔ 爆款下回复 5</b>5/5</div>
+          <div class="g done"><b>✔ 认识 5 个粉丝</b>8/5</div>
+        </div>
+        <header style="margin-top:14px"><span class="t">最近学习</span></header>
+        <div class="row"><div class="avatar">📖</div><div class="body"><div class="l1">c01 · 第 2 步 知识学习</div><div class="l2">人设要写清身份、语气、口头禅 · 23:01</div></div></div>
+        <div class="row"><div class="avatar">📝</div><div class="body"><div class="l1">成长日记 · 11/08~11/15</div><div class="l2">12 任务成 2 败 3、2 篇作品、6 个粉丝</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 系统 ================= -->
+  <section class="view" id="v-system">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div class="seg" id="systemSeg"><button class="on" data-s="timeline">时间线</button><button data-s="health">健康</button><button data-s="cost">成本</button></div>
+    </div>
+
+    <div id="sysTimeline" class="grid cols-12">
+      <div class="card w8">
+        <header><span class="t">任务时间线</span><span class="n">135</span><span class="sp"><span class="tag">最近 20 条</span></span></header>
+        <div class="tl">
+          <div class="row ok"><span class="clock">22:41</span><div class="body"><div class="l1">作品发布成功 · DFY-0002</div><div class="l2">action_finished · douyin.publish</div></div></div>
+          <div class="row ok"><span class="clock">22:38</span><div class="body"><div class="l1">回了 3 条热评</div><div class="l2">action_finished · douyin.hot_comment_round</div></div></div>
+          <div class="row bad"><span class="clock">22:07</span><div class="body"><div class="l1">发图文失败</div><div class="l2">action_failed · triggerUncaughtException</div></div></div>
+          <div class="row"><span class="clock">21:53</span><div class="body"><div class="l1">服务重启</div><div class="l2">connect listening on 8765</div></div></div>
+          <div class="row"><span class="clock">21:30</span><div class="body"><div class="l1">收到消息「发个抖音图文去」</div><div class="l2">message_received · c2c</div></div></div>
+        </div>
+      </div>
+      <div class="card w4">
+        <header><span class="t">失败原因</span><span class="n">3</span></header>
+        <div class="row"><div class="body"><div class="l1">缺少文案参数 <span class="tag bad">1 次</span></div><div class="l2">need_text · 22:07</div></div></div>
+        <div class="row"><div class="body"><div class="l1">找不到命令 <span class="tag bad">1 次</span></div><div class="l2">spawn node ENOENT · 10:04</div></div></div>
+        <div class="row"><div class="body"><div class="l1">其他 <span class="tag bad">1 次</span></div><div class="l2">triggerUncaughtException · 10:07</div></div></div>
+      </div>
+    </div>
+
+    <div id="sysHealth" style="display:none" class="grid cols-12">
+      <div class="card w6">
+        <header><span class="t">服务</span></header>
+        <div class="row"><div class="body"><div class="l1">QQ 网关</div><div class="l2">online · 已连接 42 分钟 · 掉线 2 次</div></div><div class="side"><span class="tag ok">正常</span></div></div>
+        <div class="row"><div class="body"><div class="l1">Connect 服务</div><div class="l2">127.0.0.1:8765 · pid 82375 · uptime 12m</div></div><div class="side"><span class="tag ok">正常</span></div></div>
+        <div class="row"><div class="body"><div class="l1">发件箱积压</div><div class="l2">qq_outbox 2 条 queued（群消息被 QQ 拒，等下条群消息补发）</div></div><div class="side"><span class="tag wait">注意</span></div></div>
+        <div class="row"><div class="body"><div class="l1">模型网关</div><div class="l2">127.0.0.1:3110 · deepseek-flash</div></div><div class="side"><span class="tag ok">正常</span></div></div>
+      </div>
+      <div class="card w6">
+        <header><span class="t">最近异常</span><span class="n">2</span></header>
+        <div class="row"><div class="body"><div class="l1">22:07 douyin-post 崩溃</div><div class="l2">TypeError: fetch failed · SocketError other side closed</div></div><div class="side"><span class="tag bad">已定位</span></div></div>
+        <div class="row"><div class="body"><div class="l1">10:07 spawn node ENOENT</div><div class="l2">launchd PATH 没有 homebrew · 已修</div></div><div class="side"><span class="tag ok">已修复</span></div></div>
+      </div>
+    </div>
+
+    <div id="sysCost" style="display:none" class="grid cols-12">
+      <div class="card w8">
+        <header><span class="t">模型调用 · 近 14 天</span><span class="n">62 次</span></header>
+        <div class="spark" style="height:120px">
+          <i style="height:30%"></i><i style="height:42%"></i><i style="height:36%"></i><i style="height:58%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:40%"></i>
+          <i style="height:52%"></i><i style="height:70%"></i><i style="height:44%"></i><i style="height:62%"></i><i style="height:56%"></i><i style="height:68%"></i><i style="height:56%"></i>
+        </div>
+        <div class="meta">每日上限 50 次 · 今天 28/50 · tokens 统计待接入</div>
+      </div>
+      <div class="card w4">
+        <header><span class="t">今天</span></header>
+        <div class="row"><div class="body"><div class="l1">文本调用</div><div class="l2">28 次 · 剩余 22 次</div></div></div>
+        <div class="row"><div class="body"><div class="l1">语音调用</div><div class="l2">1 次</div></div></div>
+        <div class="row"><div class="body"><div class="l1">平均每次耗时</div><div class="l2">1.8s（估算）</div></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="archModal">
+  <div class="sheet">
+    <h3>模块化架构 · 加模块只改两处</h3>
+    <p>前端一个注册表，后端一个数据源表；新增页面/数据源都不用碰 shell 和路由。</p>
+    <pre>connect/board/
+  shell.mjs        # 顶栏 + 导航 + 轮询 + 路由（不认识具体模块）
+  index.mjs        # MODULES = [home, content, interact, growth, system]
+  modules/
+    home.mjs  content.mjs  interact.mjs  growth.mjs  system.mjs
+  sections.mjs     # 分页数据源注册表（Map）
+    sections/works.mjs comments.mjs hot.mjs timeline.mjs ...</pre>
+    <ul>
+      <li><b>加一个页面</b>：新建 <code>modules/粉丝.mjs</code>，在 <code>index.mjs</code> 的 MODULES 里加一行。</li>
+      <li><b>加一个列表</b>：新建 <code>sections/snapshots.mjs</code>，在 <code>sections.mjs</code> 注册一行；<code>GET /api/board/list?section=snapshots</code> 立即可用。</li>
+      <li><b>卡片规范</b>：标题+计数+右侧操作 / 行高 ≥52 / 两行文字 / tag 五色 / 统一分页。</li>
+      <li>单文件 ≤400 行，超了拆子模块。</li>
+    </ul>
+    <button class="chip" id="closeArch">知道了</button>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const nav = $('#nav');
+nav.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-v]');
+  if (!b) return;
+  nav.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === 'v-' + b.dataset.v));
+});
+$('#archBtn').onclick = () => $('#archModal').classList.add('on');
+$('#closeArch').onclick = () => $('#archModal').classList.remove('on');
+$('#archModal').addEventListener('click', (e) => { if (e.target.id === 'archModal') e.currentTarget.classList.remove('on'); });
+
+// 内容二级
+const segT = (sel, attr, onPick) => {
+  const seg = document.querySelector(sel);
+  if (!seg) return;
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-' + attr + ']');
+    if (!b) return;
+    seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    onPick(b.dataset[attr]);
+  });
+};
+segT('#contentSeg', 'c', (v) => {
+  document.getElementById('contentWorks').style.display = v === 'works' ? '' : 'none';
+  document.getElementById('contentComments').style.display = v === 'comments' ? '' : 'none';
+});
+segT('#interactSeg', 'i', (v) => {
+  document.getElementById('interactPending').style.display = v === 'pending' ? '' : 'none';
+  document.getElementById('interactHot').style.display = v === 'hot' ? '' : 'none';
+});
+segT('#systemSeg', 's', (v) => {
+  for (const [k, id] of [['timeline','sysTimeline'],['health','sysHealth'],['cost','sysCost']]) {
+    document.getElementById(id).style.display = k === v ? '' : 'none';
+  }
+});
+
+// 作品切换
+const WORKS = {
+  1: { title: '屏幕光晃得我眼睛发花，爸爸还不睡', code: 'DFY-0001', body: '趴在桌边偷看爸爸敲代码，屏幕光一晃一晃，晃得我眼睛都花了🥹 你加班的时候也这样吗？来唠两句呀', comments: [] },
+  2: { title: 'BLG夺冠那晚我尾巴撞桌角转了三圈', code: 'DFY-0002', body: 'BLG夺冠那晚我甩尾巴甩到桌角，疼得转了三圈，你也蹲在屏幕前喊过吗？来浇个朋友呀🐳', comments: [['LP0423','[宕机]×5','这串宕机我数了半天，数到第三个就跑神了……爸爸也卡住了吗','ok'],['坏脾气','大肥鱼也会看比赛吗','会看会看！就是有点看不懂，你得带着我🐟','ok']] },
+  3: { title: '历史/不可见作品的评论存档', code: 'DFY-0000', body: '这些评论通知来自主页上已看不见的作品（删除或不在「作品」里），先归到这里，不丢掉。', comments: [['木纹','@','这个@是什么意思呀，我盯着看半天也没看懂','ok']] },
+};
+document.getElementById('workList').addEventListener('click', (e) => {
+  const it = e.target.closest('.witem');
+  if (!it) return;
+  document.querySelectorAll('#workList .witem').forEach((x) => x.classList.toggle('on', x === it));
+  const w = WORKS[it.dataset.w];
+  document.getElementById('dTitle').textContent = w.title;
+  document.getElementById('dBody').textContent = w.body;
+  document.getElementById('wCount').textContent = w.comments.length;
+  const list = w.comments.length ? w.comments.map((c) =>
+    '<div class="row"><div class="avatar">' + c[0].slice(0,1) + '</div><div class="body"><div class="l1">' + c[0] + '</div><div class="l2">' + c[1] + '</div>' +
+    (c[2] ? '<div class="l2" style="color:#bff2cd">回复：' + c[2] + '</div>' : '') + '</div><div class="side"><span class="tag ' + c[3] + '">' + (c[3] === 'ok' ? '已回' : '未回') + '</span></div></div>').join('')
+    : '<div class="empty">这个作品还没有评论。</div>';
+  document.getElementById('workComments').innerHTML = list;
+});
+</script>
+</body>
+</html>

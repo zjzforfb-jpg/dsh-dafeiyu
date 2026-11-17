@@ -1,0 +1,4 @@
+import assert from 'node:assert/strict'; import { test } from 'node:test';
+import { advancePlan, createCognitionPlan, policyCheck } from '../brain/cognition/kernel.mjs';
+test('认知中枢生成有限计划并在未知回执时要求重新观察',()=>{const plan=createCognitionPlan({goal:'回复评论',environment:{app:'douyin'},skills:[{skill_id:'reply',version:1,status:'enabled'}],steps:[{action:'open_comments'},{action:'send_reply'}]});assert.equal(plan.status,'proposed');assert.equal(plan.selectedSkill.skillId,'reply');let next=advancePlan(plan,0,{status:'succeeded',observationId:'obs1'});next=advancePlan(next,1,{status:'unknown',observationId:'obs2'});assert.equal(next.status,'needs_reobserve');assert.equal(policyCheck(next).allowed,true);});
+test('高风险计划没有爸爸批准时阻断',()=>{const plan=createCognitionPlan({goal:'发送消息',risk:'high',actor:'friend',steps:['send']});assert.equal(plan.status,'blocked');assert.equal(policyCheck(plan).allowed,false);});

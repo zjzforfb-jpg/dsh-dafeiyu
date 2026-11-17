@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isVoiceAttachment, normalizeDispatch } from '../connect/qq/gateway.mjs';
 import { loadQqConfig, QqApi } from '../connect/qq/api.mjs';
-import { initQq, logInbound, savePeer, peer, conversationHistory, reserve, usage, dayKey } from '../connect/qq/store.mjs';
+import { initQq, logInbound, savePeer, syncQqOwner, peer, conversationHistory, reserve, usage, dayKey } from '../connect/qq/store.mjs';
 import { CallSessions } from '../connect/qq/call.mjs';
 import { QqService } from '../connect/qq/service.mjs';
 import { openMemory } from '../brain/memory.mjs';
 import { listMemories } from '../connect/qq/memory.mjs';
 import { approveTask, initTasks, latestPendingTask, proposeTask, startTask } from '../connect/tasks.mjs';
+import { DAILY_BUDGET } from '../connect/core/budget.mjs';
 
 const KIND = 'c2c', CONV = 'user-openid-0001', TS = Date.UTC(2026, 10, 14, 1, 0);
 const response = data => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -88,6 +89,35 @@ test('QQ store deduplicates inbound messages, isolates histories, and caps daily
   db.close();
 });
 
+test('QQ owner role follows configured account ID and ignores display labels', () => {
+  const db = setup();
+  savePeer(db, { kind: 'c2c', id: CONV, label: '朋友' });
+  savePeer(db, { kind: 'c2c', id: 'other-openid-0002', label: '爸爸' });
+  syncQqOwner(db, CONV);
+  assert.equal(peer(db, 'c2c', CONV).role, 'owner');
+  assert.equal(peer(db, 'c2c', 'other-openid-0002').role, 'friend');
+  savePeer(db, { kind: 'c2c', id: CONV, label: '七海' });
+  assert.equal(peer(db, 'c2c', CONV).role, 'owner');
+  syncQqOwner(db, 'other-openid-0002');
+  assert.equal(peer(db, 'c2c', CONV).role, 'friend');
+  assert.equal(peer(db, 'c2c', 'other-openid-0002').role, 'owner');
+  db.close();
+});
+
+test('legacy QQ peers gain a role without changing contact settings', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE qq_peers(conv_kind TEXT NOT NULL,conv_id TEXT NOT NULL,label TEXT,enabled INTEGER NOT NULL,auto_reply INTEGER NOT NULL,voice_reply INTEGER NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(conv_kind,conv_id))");
+  db.prepare("INSERT INTO qq_peers VALUES('c2c',?,'爸爸',1,1,0,datetime('now'))").run(CONV);
+  initQq(db);
+  assert.equal(peer(db, 'c2c', CONV).role, 'friend');
+  syncQqOwner(db, CONV);
+  const migrated = peer(db, 'c2c', CONV);
+  assert.equal(migrated.role, 'owner');
+  assert.equal(migrated.label, '爸爸');
+  assert.equal(migrated.voiceReply, 0);
+  db.close();
+});
+
 test('QQ call sessions expire after the quiet window and cap turns', () => {
   let clock = 0;
   const calls = new CallSessions({ timeoutMs: 60_000, maxTurns: 2, now: () => clock });
@@ -156,10 +186,21 @@ test('task recovery marks interrupted approved/running work unknown and prevents
 });
 
 test('QQ private action markers become confirmation tasks instead of running immediately', async () => {
-  const db=setup();savePeer(db,{kind:'c2c',id:CONV,label:'爸爸'});const sent=[];
+  const db=setup();savePeer(db,{kind:'c2c',id:CONV,label:'爸爸'});syncQqOwner(db,CONV);const sent=[];
   const qq=service(db,{api:{sendText:async value=>sent.push(value)},ask:async()=> '我马上去看 [DO:douyin.reply_comments]'});
   await qq.handle({kind:'c2c',id:CONV,messageId:'private-task-1',text:'去看看评论',attachments:[]});
   const taskRow=db.prepare("SELECT status,payload FROM external_tasks WHERE conv_kind='c2c'").get();assert.equal(taskRow.status,'awaiting_confirmation');assert.match(sent.at(-1).content,/待确认任务/u);db.close();
+});
+
+test('QQ private confirmation consumes pending task without a temporal dead zone error', async () => {
+  const db = setup(); savePeer(db, { kind: 'c2c', id: CONV, label: '爸爸' }); syncQqOwner(db, CONV);
+  const sent = [];
+  const qq = service(db, { api: { sendText: async value => sent.push(value) } });
+  const pending = proposeTask(db, { kind: 'c2c', convId: CONV, sourceMessageId: 'confirm-source', intent: { intent: 'test', operations: [] }, proposerPeerId: CONV });
+  await qq.handle({ kind: 'c2c', id: CONV, messageId: 'confirm-1', text: '同意', attachments: [] });
+  assert.equal(db.prepare('SELECT status FROM external_tasks WHERE id=?').get(pending.id).status, 'succeeded');
+  assert.match(sent.at(-1).content, /任务已执行完成/u);
+  db.close();
 });
 
 test('QQ voice input is transcribed and answered with a voice bar, falling back to text when synthesis fails', async () => {
@@ -179,8 +220,8 @@ test('QQ voice input is transcribed and answered with a voice bar, falling back 
   assert.equal(voiceSent.length, 1);
   assert.equal(texts.length, 0);
   const broken = service(db, {
-    api: { sendText: async value => { texts.push(value); }, sendVoice: async () => { throw new Error('voice_unavailable'); } },
-    voice: fakeVoice(), downloadImpl,
+    api: { sendText: async value => { texts.push(value); }, sendVoice: async value => { voiceSent.push(value); } },
+    voice: fakeVoice({ synthesize: async () => { throw new Error('voice_unavailable'); } }), downloadImpl,
   });
   await broken.handle({ kind: KIND, id: CONV, messageId: 'v-2', text: '', attachments: [attachment] });
   assert.equal(texts.length, 1);
@@ -215,7 +256,8 @@ test('QQ service stops answering when the daily model budget is exhausted', asyn
   const db = setup();
   savePeer(db, { kind: KIND, id: CONV, voiceReply: false });
   const day = dayKey(TS);
-  for (let index = 0; index < 50; index += 1) reserve(db, day, 'model_calls', 50);
+  // D-2：模型调用是跨渠道共享的日额度（不再各渠道各自 50），用光共享额度就停。
+  for (let index = 0; index < DAILY_BUDGET.modelCalls; index += 1) reserve(db, day, 'model_calls', DAILY_BUDGET.modelCalls);
   const texts = [];
   const qq = service(db, { api: { sendText: async value => { texts.push(value); }, sendVoice: async () => ({}) } });
   const result = await qq.handle({ kind: KIND, id: CONV, messageId: 'b-1', text: '你好', attachments: [] });
@@ -230,7 +272,7 @@ test('QQ chat writes long-term memory, recalls it into the brain, and logs deskt
   const memory = openMemory(join(dir, 'dafeiyu-memory.sqlite'));
   try {
     const db = setup();
-    savePeer(db, { kind: KIND, id: CONV, label: '爸爸', enabled: true, autoReply: true, voiceReply: false });
+    savePeer(db, { kind: KIND, id: CONV, label: '爸爸', enabled: true, autoReply: true, voiceReply: false }); syncQqOwner(db, CONV);
     const sent = [];
     const contexts = [];
     const serviceWith = ask => new QqService({
@@ -292,6 +334,22 @@ test('QQ group messages normalize mentions and only answer a fraction of ambient
   assert.equal(sent.length, 2);
 });
 
+test('QQ group conversation does not receive the owner capability index', async () => {
+  const db = setup();
+  savePeer(db, { kind: 'group', id: 'group-openid-1', label: '家人群', enabled: true, autoReply: true, voiceReply: false });
+  const seen = [];
+  const qq = new QqService({
+    db, now: () => TS, random: () => 0, groupReplyRate: 1, groupCooldownMs: 0,
+    voice: fakeVoice(), ask: async (payload) => { seen.push(payload); return '我在'; },
+    api: { sendText: async () => ({}), sendVoice: async () => ({}) },
+    gateway: { start: async () => {}, close: async () => {} },
+  });
+  await qq.handle({ kind: 'group', id: 'group-openid-1', messageId: 'capability-group-1', text: '大肥鱼，你有哪些能力？', memberId: 'member-a', atMe: true });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].capabilities, '');
+  db.close();
+});
+
 test('QQ group replies carry speaker labels and skip messages aimed at other members', async () => {
   const db = setup();
   savePeer(db, { kind: 'group', id: 'group-openid-1', label: '家人群', enabled: true, autoReply: true, voiceReply: false });
@@ -320,4 +378,49 @@ test('QQ group memory never writes private long-term facts', async () => {
   const qq=service(db,{memory,home:dir,api:{sendText:async()=>{}},ask:async()=> '记住啦'});
   await qq.handle({kind:'group',id:'group-openid-1',messageId:'memory-group-1',text:'请记住：爸爸的私密爱好是紫色星云',attachments:[],memberId:'dad',atMe:true});
   assert.equal(memory.prepare('SELECT COUNT(*) AS n FROM memories').get().n,0);db.close();memory.close();rmSync(dir,{recursive:true,force:true});
+});
+
+test('unverified QQ private peer cannot list or change owner memory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dafeiyu-qq-friend-memory-'));
+  const memory = openMemory(join(dir, 'dafeiyu-memory.sqlite'));
+  memory.prepare("INSERT INTO memories(content,kind,source,confidence) VALUES('爸爸的秘密','user_fact','test',1)").run();
+  const db = setup();
+  savePeer(db, { kind: 'c2c', id: CONV, label: '朋友' });
+  const sent = [];
+  const qq = service(db, { api: { sendText: async ({ content }) => { sent.push(content); } } });
+  qq.memory = memory;
+  for (const [messageId, text] of [
+    ['friend-memory-list', '/记忆'],
+    ['friend-memory-save', '/记住：朋友的内容'],
+    ['friend-memory-forget', '/忘记记忆 1'],
+  ]) {
+    const result = await qq.handle({ kind: 'c2c', id: CONV, messageId, text, attachments: [] });
+    assert.equal(result.error, 'memory_scope_denied');
+  }
+  assert.equal(sent.some((reply) => reply.includes('爸爸的秘密')), false);
+  assert.deepEqual(memory.prepare('SELECT content FROM memories').all().map((row) => row.content), ['爸爸的秘密']);
+  memory.close();
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('QQ voice delivery with unknown outcome does not fall back to a second send', async () => {
+  const db = setup();
+  savePeer(db, { kind: 'c2c', id: CONV, label: '爸爸' }); syncQqOwner(db, CONV);
+  let textSends = 0;
+  const qq = service(db, {
+    downloadImpl: async () => media(),
+    api: {
+      sendVoice: async () => { throw new Error('connection_lost_after_send'); },
+      sendText: async () => { textSends += 1; },
+    },
+  });
+  const result = await qq.handle({
+    kind: 'c2c', id: CONV, messageId: 'uncertain-voice-1',
+    text: '你好', attachments: [{ content_type: 'audio/silk', url: 'https://gchat.qpic.cn/media/voice.silk' }],
+  });
+  assert.equal(result.error, 'voice_delivery_not_confirmed');
+  assert.equal(textSends, 0);
+  assert.equal(db.prepare('SELECT status FROM qq_messages WHERE msg_id=?').get('uncertain-voice-1').status, 'unknown');
+  db.close();
 });

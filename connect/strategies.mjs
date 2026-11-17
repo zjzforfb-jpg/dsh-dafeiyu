@@ -1,0 +1,17 @@
+import { randomUUID } from 'node:crypto';
+
+export function initStrategies(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS strategy_trials(
+    id TEXT PRIMARY KEY, strategy_id TEXT NOT NULL, task_id TEXT, skill_id TEXT,
+    environment TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running','succeeded','failed','unknown')),
+    verified INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER, retry_count INTEGER NOT NULL DEFAULT 0,
+    result TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (datetime('now')), finished_at TEXT
+  ); CREATE INDEX IF NOT EXISTS strategy_lookup ON strategy_trials(strategy_id,status,created_at);`);
+}
+const enc = v => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } };
+const dec = v => { try { return JSON.parse(v); } catch { return {}; } };
+export function startStrategyTrial(db,{strategyId,taskId=null,skillId=null,environment={},reason='',now=new Date()}) { initStrategies(db); const id=`trial_${randomUUID()}`; db.prepare('INSERT INTO strategy_trials(id,strategy_id,task_id,skill_id,environment,reason,created_at) VALUES(?,?,?,?,?,?,?)').run(id,strategyId,taskId,skillId,enc(environment),String(reason).slice(0,300),new Date(now).toISOString()); return id; }
+export function finishStrategyTrial(db,id,{success,verified=false,durationMs=null,retryCount=0,result={}},now=new Date()) { initStrategies(db); const status=success===true?'succeeded':success===false?'failed':'unknown'; db.prepare('UPDATE strategy_trials SET status=?,verified=?,duration_ms=?,retry_count=?,result=?,finished_at=? WHERE id=?').run(status,verified?1:0,durationMs,retryCount,enc(result),new Date(now).toISOString(),id); return db.prepare('SELECT * FROM strategy_trials WHERE id=?').get(id); }
+export function strategyStats(db,{environment={},strategyIds=null}={}) { initStrategies(db); const rows=db.prepare('SELECT strategy_id,status,verified,duration_ms,retry_count,environment FROM strategy_trials WHERE status!=\'running\'').all(); const wanted=Array.isArray(strategyIds)?new Set(strategyIds):null; const key=JSON.stringify(environment); const grouped=new Map(); for(const row of rows){if(wanted&&!wanted.has(row.strategy_id))continue;const env=dec(row.environment);if(environment.app&&env.app!==environment.app)continue;if(environment.screen&&env.screen!==environment.screen)continue;const g=grouped.get(row.strategy_id)??{strategy_id:row.strategy_id,runs:0,successes:0,verified:0,total_ms:0,retries:0};g.runs++;g.successes+=row.status==='succeeded'?1:0;g.verified+=row.verified?1:0;g.total_ms+=Number(row.duration_ms)||0;g.retries+=Number(row.retry_count)||0;grouped.set(row.strategy_id,g);} return [...grouped.values()].map(g=>({...g,success_rate:g.runs?g.successes/g.runs:0,verified_rate:g.runs?g.verified/g.runs:0,avg_duration_ms:g.runs?g.total_ms/g.runs:0,avg_retries:g.runs?g.retries/g.runs:0,score:g.runs?g.verified/g.runs*0.6+g.successes/g.runs*0.3+(1-Math.min(1,g.avg_retries/3))*0.1:0})).sort((a,b)=>b.score-a.score||a.avg_duration_ms-b.avg_duration_ms); }
+export function chooseStrategy(db,{strategyIds,environment={},requireVerified=true}={}) { const stats=strategyStats(db,{strategyIds,environment}); const eligible=stats.filter(s=>!requireVerified||s.verified_rate>0); return { strategy:eligible[0]?.strategy_id??strategyIds?.[0]??null, reason:eligible[0]?'highest_verified_success_score':'no_verified_history', candidates:stats }; }

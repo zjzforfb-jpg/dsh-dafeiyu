@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼 · 数据流</title>
+<link rel="stylesheet" href="/shell/nav.css">
+<link rel="stylesheet" href="/flow/flow.css">
+<link rel="icon" href="/home/pet.png">
+</head>
+<body>
+<a class="skip" href="#scene">跳到流程图</a>
+
+<header class="top">
+  <div class="brand">
+    <span class="dot" aria-hidden="true"></span>
+    <h1>数据流</h1>
+    <p class="sub">一句话进来，从左到右穿过九段；哪一段在跑，光就往哪走。</p>
+  </div>
+  <dl class="stats" id="stats">
+    <div><dt>今日事件</dt><dd id="sEvents">0</dd></div>
+    <div><dt>今日执行</dt><dd id="sActions">0</dd></div>
+    <div><dt>今日失败</dt><dd id="sFails">0</dd></div>
+    <div><dt>在跑任务</dt><dd id="sTasks">0</dd></div>
+    <div class="cov"><dt>工具覆盖</dt><dd id="sCoverage">—</dd><div class="covBar" id="covBar" role="img" aria-label="工具覆盖度"></div></div>
+  </dl>
+  <div class="liveBox">
+    <span class="liveDot" id="liveDot" title="事件流连接状态"></span>
+    <span id="liveText">正在连事件流…</span>
+    <button id="pause" class="btn" aria-pressed="false">暂停动效</button>
+    <a class="btn" href="/live/">实时工作流 →</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="scene" class="scene" aria-label="数据流图">
+    <canvas id="cv"></canvas>
+    <div id="labels" class="labels"></div>
+    <div id="cols" class="cols" aria-hidden="true"></div>
+  </section>
+
+  <aside id="panel" class="panel">
+    <header class="pHead">
+      <span id="pTag" class="pTag">节点</span>
+      <button id="pClose" class="pClose" title="关闭（Esc）" aria-label="关闭">×</button>
+    </header>
+    <h2 id="pName">点一个节点</h2>
+    <p id="pSub" class="pSub"></p>
+    <ul id="pFacts" class="pFacts"></ul>
+    <dl id="pMeta" class="pMeta"></dl>
+    <a id="pLive" class="cta" href="/live/">在实时工作流里看这一段 →</a>
+  </aside>
+</main>
+
+<footer id="ticker" class="ticker" aria-live="polite"></footer>
+
+<div id="fatal" class="fatal" hidden><p id="fatalText"></p></div>
+
+<script type="module" src="/flow/flow.js"></script>
+<script>
+  // 万一模块没起来（路径/语法问题），把原因显示出来，而不是给一块黑屏。
+  window.addEventListener('error', (event) => {
+    const box = document.getElementById('fatal');
+    const text = document.getElementById('fatalText');
+    if (!box || !text) return;
+    text.textContent = `页面脚本没起来：${event.message ?? ''}`;
+    box.hidden = false;
+  });
+  setTimeout(() => {
+    if (window.__FLOW_READY__) return;
+    const box = document.getElementById('fatal');
+    const text = document.getElementById('fatalText');
+    if (!box || !text || !box.hidden) return;
+    text.textContent = '3 秒内没有画上流程图：检查 /flow/flow.js、/flow/layout.mjs、/arch/graph.mjs 是否 200。';
+    box.hidden = false;
+  }, 3000);
+</script>
+</body>
+</html>

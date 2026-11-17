@@ -70,7 +70,7 @@ if (!modelKey && process.platform === 'darwin') {
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch { /* 密钥尚未配置，记忆桥会明确返回配置错误。 */ }
 }
-const brain = await startBrain({ home, token: aiSettings.apiKey, apiKey: modelKey, personaPath: join(projectRoot, 'config', 'persona.md'), petPort });
+const brain = await startBrain({ home, token: aiSettings.apiKey, apiKey: modelKey, personaPath: join(projectRoot, 'config', 'persona.md'), petPort, eventStoreRoot: join(projectRoot, 'runtime') });
 console.log(`[大肥鱼] 记忆桥已启动；模型${modelKey ? '已就绪' : '尚未配置密钥'}。`);
 const life = modelKey ? startLifeSchedule({ home, brainPort: brain.port, token: aiSettings.apiKey, petPort }) : null;
 

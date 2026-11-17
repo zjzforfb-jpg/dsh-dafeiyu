@@ -5,6 +5,7 @@
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { openChat, startVoiceCall, findCallWindow } from '../connect/macui/wechat.mjs';
+import { ensureBinaries, listWindows } from '../connect/macui/index.mjs';
 
 const root = process.cwd();
 const args = process.argv.slice(2);
@@ -28,6 +29,20 @@ function startBridge() {
   });
   child.unref();
   return child.pid;
+}
+
+// --probe：只回答「能不能拨」——微信窗口在不在、联系人叫什么，绝不拨号
+if (has('probe')) {
+  const bins = ensureBinaries(root);
+  // 微信的 owner 名有两种拼法（中文「微信」/英文「WeChat」），两个都探
+  const windows = [...listWindows(bins, '微信'), ...listWindows(bins, 'WeChat')];
+  console.log(JSON.stringify({
+    ok: windows.length > 0,
+    contact,
+    windows: windows.map((w) => ({ name: w.name, width: w.width, height: w.height })),
+    note: '探针：不拨号、不动声卡',
+  }, null, 1));
+  process.exit(0);
 }
 
 runSound('--enable');

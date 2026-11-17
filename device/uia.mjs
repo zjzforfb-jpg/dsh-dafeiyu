@@ -26,23 +26,47 @@ const SERVER_PORT = Number(process.env.DAFEIYU_UIA_PORT || 19008);
 const DEVICE_PORT = 9008;
 
 /** Reuse the device-side uiautomator2 server through an adb port forward. */
-async function ensureServer(serial) {
-  await adb(['-s', serial, 'forward', `tcp:${SERVER_PORT}`, `tcp:${DEVICE_PORT}`], 15_000);
-  const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/ping`, { signal: AbortSignal.timeout(4000) });
-  if (!response.ok) throw new Error('uiautomator_server_unavailable');
+async function ping(serial) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/ping`, { signal: AbortSignal.timeout(4000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
-async function dumpXml(serial) {
-  await ensureServer(serial);
-  const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/jsonrpc/0`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'dumpWindowHierarchy', params: [false] }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const payload = await response.json();
-  if (!payload?.result) throw new Error(payload?.error?.message ?? 'uiautomator_dump_failed');
-  return payload.result;
+/** Reuse the device-side uiautomator2 server through an adb port forward. */
+async function ensureServer(serial) {
+  if (await ping(serial)) return;
+  await adb(['-s', serial, 'forward', '--remove', `tcp:${SERVER_PORT}`], 10_000).catch(() => {});
+  await adb(['-s', serial, 'forward', `tcp:${SERVER_PORT}`, `tcp:${DEVICE_PORT}`], 15_000);
+  for (let i = 0; i < 6; i += 1) {
+    if (await ping(serial)) return;
+    await sleep(700);
+  }
+  throw new Error('uiautomator_server_unavailable');
+}
+
+async function dumpXml(serial, attempt = 0) {
+  try {
+    await ensureServer(serial);
+    const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/jsonrpc/0`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'dumpWindowHierarchy', params: [false] }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const payload = await response.json();
+    if (!payload?.result) throw new Error(payload?.error?.message ?? 'uiautomator_dump_failed');
+    return payload.result;
+  } catch (error) {
+    // 设备端服务偶尔会被抢 UiAutomation 或瞬时掉线：重连一次再试，别把整条任务带崩
+    if (attempt < 2) {
+      await sleep(1500);
+      return dumpXml(serial, attempt + 1);
+    }
+    throw new Error(`uia_dump_failed: ${error.message}`);
+  }
 }
 
 /** Dump the current window and return lightweight nodes. */

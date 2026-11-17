@@ -1,0 +1,84 @@
+/* 四个页面共用的一条 title bar。
+   用法：<link rel="stylesheet" href="/shell/nav.css"><script src="/shell/nav.js" defer></script>
+   nav.js 会把这个条插到 body 最前面，并给 <html> 打上 .dsh-nav-on 与 data-page，
+   各页的布局补偿写在本文件下半部分（只动被标记的那一页）。 */
+
+:root { --dsh-nav-h: 46px; }
+
+.dsh-nav {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--dsh-nav-h);
+  z-index: 9999;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 14px;
+  color: #e6edf7;
+  font: 13px/1 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  background: linear-gradient(180deg, rgba(7, 11, 20, 0.97), rgba(7, 11, 20, 0.88));
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 6px 24px rgba(2, 6, 16, 0.45);
+  /* 注：这里不用 backdrop-filter —— 和消息页 header 的模糊叠在一起时，
+     headless（软件合成）会把整页画成空白。 */
+  user-select: none;
+}
+
+.dsh-nav .dsh-brand {
+  display: flex; align-items: center; gap: 9px;
+  margin-right: 10px; padding-right: 12px;
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  color: #e6edf7; text-decoration: none; font-weight: 600; letter-spacing: .2px;
+}
+.dsh-nav .dsh-brand i {
+  width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+  font-size: 12px; font-style: normal; color: #04121c; font-weight: 800;
+  background: linear-gradient(140deg, #67e8f9, #a78bfa);
+  box-shadow: 0 3px 10px rgba(34, 211, 238, 0.35);
+}
+
+.dsh-nav a.dsh-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 9px;
+  color: #93a3b8; text-decoration: none; white-space: nowrap;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.dsh-nav a.dsh-tab:hover { color: #e6edf7; background: rgba(148, 163, 184, 0.12); }
+.dsh-nav a.dsh-tab.on {
+  color: #eafcff;
+  background: rgba(34, 211, 238, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.38);
+}
+.dsh-nav a.dsh-tab .dsh-e { font-size: 12px; opacity: .85; }
+
+.dsh-nav .dsh-right { margin-left: auto; display: flex; align-items: center; gap: 10px; color: #64748b; font-size: 11.5px; }
+.dsh-nav .dsh-right a { color: #93a3b8; text-decoration: none; }
+.dsh-nav .dsh-right a:hover { color: #e6edf7; }
+
+/* ---- 各页布局补偿：只调被注入的那一页 ---- */
+
+/* 看板 / 实时工作流：整页是 100vh 的 flex 布局，把条的高度让出来 */
+html.dsh-nav-on[data-page="board"] body,
+html.dsh-nav-on[data-page="live"] body {
+  height: calc(100vh - var(--dsh-nav-h));
+  margin-top: var(--dsh-nav-h);
+}
+html.dsh-nav-on[data-page="board"] header.sticky,
+html.dsh-nav-on[data-page="board"] .topbar { top: var(--dsh-nav-h); }
+
+/* 3D 架构：画布铺满窗口、HUD 绝对定位，只把顶部那几块往下挪 */
+html.dsh-nav-on[data-page="arch"] #title,
+html.dsh-nav-on[data-page="arch"] #stats { top: calc(22px + var(--dsh-nav-h)); }
+html.dsh-nav-on[data-page="arch"] #hint { top: calc(24px + var(--dsh-nav-h)); }
+html.dsh-nav-on[data-page="arch"] #detail { top: calc(118px + var(--dsh-nav-h)); }
+html.dsh-nav-on[data-page="arch"] #flow { top: calc(108px + var(--dsh-nav-h)); }
+
+/* 消息中心 / 通话页：普通文档流，sticky header 让位 */
+html.dsh-nav-on[data-page="messages"] body,
+html.dsh-nav-on[data-page="call"] body { padding-top: var(--dsh-nav-h); }
+html.dsh-nav-on[data-page="messages"] header,
+html.dsh-nav-on[data-page="call"] header { top: var(--dsh-nav-h); }
+
+@media (max-width: 720px) {
+  .dsh-nav .dsh-right { display: none; }
+  .dsh-nav a.dsh-tab { padding: 6px 9px; font-size: 12.5px; }
+}
+
+/* 主页：整页滚动，不需要固定高度 */
+html[data-page="home"] body.home { padding-top: calc(var(--dsh-nav-h) + 18px); }

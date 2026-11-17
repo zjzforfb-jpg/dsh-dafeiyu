@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>大肥鱼 · 统一智能体架构</title>
+<link rel="stylesheet" href="/shell/nav.css">
+<script src="/shell/nav.js" defer></script>
+<style>
+  :root {
+    --bg: #04060f;
+    --ink: #d7ecff;
+    --dim: #6f8fb3;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --pink: #f472b6;
+    --amber: #fbbf24;
+    --red: #ef4444;
+    --line: rgba(56, 189, 248, .18);
+    --glass: linear-gradient(160deg, rgba(10, 20, 38, .78), rgba(6, 12, 24, .62));
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); overflow: hidden; }
+  body {
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; }
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+
+  /* 背景氛围：中心径向光 + 暗角 + 极细扫描线 */
+  #aura {
+    position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    background:
+      radial-gradient(60% 55% at 50% 46%, rgba(34, 211, 238, .12), transparent 70%),
+      radial-gradient(90% 80% at 50% 110%, rgba(167, 139, 250, .10), transparent 65%),
+      radial-gradient(120% 100% at 50% 50%, transparent 45%, rgba(2, 4, 10, .92) 100%);
+  }
+  #scan {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2; opacity: .35;
+    background: repeating-linear-gradient(0deg, rgba(120, 200, 255, .045) 0 1px, transparent 1px 3px);
+    mix-blend-mode: screen;
+  }
+
+  #hud { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+  #hud > * { pointer-events: auto; }
+  .panel {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 18px 40px -22px rgba(0, 0, 0, .9), inset 0 1px 0 rgba(255, 255, 255, .05);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  /* 标题 */
+  #title { position: fixed; top: 22px; left: 24px; padding: 14px 18px 13px; min-width: 268px; }
+  #title h1 {
+    margin: 0; font-size: 17px; letter-spacing: .04em; font-weight: 600;
+    background: linear-gradient(92deg, #eafaff, var(--cyan) 46%, var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #title p { margin: 5px 0 0; font-size: 11.5px; color: var(--dim); letter-spacing: .02em; }
+  #live { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 11px; color: #9fd4ea; }
+  #live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: breathe 1.8s ease-in-out infinite; }
+  #live.off .dot { background: var(--amber); box-shadow: 0 0 10px var(--amber); animation: none; }
+  #live.off { color: #e8c98a; }
+  @keyframes breathe { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
+
+  /* 计数 */
+  #stats { position: fixed; top: 22px; right: 24px; display: flex; gap: 10px; }
+  .stat { padding: 11px 14px 10px; min-width: 92px; }
+  .stat b {
+    display: block; font-size: 21px; line-height: 1.1; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -.02em;
+    color: #ecfaff; text-shadow: 0 0 18px rgba(34, 211, 238, .55);
+  }
+  .stat u { display: block; margin-top: 3px; font-size: 10.5px; color: var(--dim); text-decoration: none; letter-spacing: .06em; }
+  .stat.hot b { color: #ffe9a8; text-shadow: 0 0 22px rgba(251, 191, 36, .7); }
+
+  /* 渠道流量 */
+  #channels { position: fixed; left: 24px; bottom: 24px; width: 248px; padding: 12px 14px 10px; }
+  #channels h3, #legend h3, #detail h3 {
+    margin: 0 0 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .16em;
+    color: #7fb9d6; text-transform: uppercase;
+  }
+  .chan { display: grid; grid-template-columns: 62px 1fr 26px; align-items: center; gap: 8px; margin: 5px 0; font-size: 11px; }
+  .chan span { color: #a9c6de; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chan i { display: block; height: 4px; border-radius: 3px; background: rgba(255, 255, 255, .07); overflow: hidden; }
+  .chan i > s { display: block; height: 100%; width: 0; border-radius: 3px; transition: width .45s cubic-bezier(.2, .8, .2, 1); text-decoration: none; }
+  .chan em { font-style: normal; text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: #8fb6d0; }
+
+  /* 图例 */
+  #legend { position: fixed; right: 24px; bottom: 24px; padding: 12px 14px 11px; }
+  .lg { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 11px; color: #a9c6de; }
+  .lg s { width: 8px; height: 8px; border-radius: 50%; text-decoration: none; box-shadow: 0 0 10px currentColor; }
+
+  /* 事件滚动条 */
+  #tickerWrap { position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; width: min(560px, calc(100vw - 620px)); min-width: 300px; padding: 10px 14px 9px; }
+  #ticker { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+  #ticker .tk { display: flex; align-items: center; gap: 8px; color: #b9d6ea; animation: slide .35s cubic-bezier(.2, .8, .2, 1); }
+  #ticker .tk i { width: 6px; height: 6px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+  #ticker .tk time { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #57748f; }
+  #ticker .tk.clickable { cursor: pointer; border-radius: 6px; margin: 0 -6px; padding: 2px 6px; transition: background .18s ease, transform .18s ease; }
+  #ticker .tk.clickable:hover { background: rgba(34, 211, 238, .09); transform: translateX(2px); }
+  #ticker .tk.on { background: rgba(34, 211, 238, .14); }
+  /* 右侧「任务流程」抽屉：点 ticker 行打开，和 #detail 互斥 */
+  #flow { position: fixed; right: 24px; top: 108px; bottom: 112px; width: 380px; padding: 14px 16px 12px; display: none; flex-direction: column; gap: 10px; overflow: hidden; }
+  #flow.show { display: flex; animation: slide .26s cubic-bezier(.2, .8, .2, 1); }
+  #flow header { display: flex; align-items: flex-start; gap: 10px; }
+  #flow h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  #flow .sub { margin: 3px 0 0; font-size: 10.5px; color: #6f8ba6; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+  #flow .close { margin-left: auto; flex: none; width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 1; }
+  #flow .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px; letter-spacing: .06em; }
+  #flow .meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 10.5px; color: #8fb0c8; }
+  #flow .meta b { color: #cfe7f6; font-weight: 500; }
+  #flow .steps { flex: 1; min-height: 0; overflow: auto; margin: 0; padding: 2px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  #flow .steps::-webkit-scrollbar { width: 5px; }
+  #flow .steps::-webkit-scrollbar-thumb { background: rgba(34, 211, 238, .2); border-radius: 4px; }
+  #flow .step { position: relative; display: grid; grid-template-columns: 52px 10px 1fr; gap: 8px; align-items: start; padding: 6px 6px 6px 2px; border-radius: 6px; cursor: pointer; transition: background .16s ease; }
+  #flow .step:hover { background: rgba(34, 211, 238, .08); }
+  #flow .step.on { background: rgba(34, 211, 238, .14); }
+  #flow .step time { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: #5d7d97; padding-top: 1px; }
+  #flow .step s { width: 8px; height: 8px; margin-top: 4px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+  #flow .step .txt { min-width: 0; }
+  #flow .step .txt b { display: block; font-size: 11.5px; font-weight: 500; color: #d8ecf8; }
+  #flow .step .txt span { display: block; margin-top: 2px; font-size: 10.5px; color: #7c9ab2; overflow-wrap: anywhere; }
+  #flow .empty { font-size: 11px; color: #6f8ba6; padding: 10px 2px; }
+  #flow .foot { font-size: 10px; color: #5d7d97; }
+  @keyframes slide { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* 节点详情 */
+  #detail { position: fixed; right: 24px; top: 118px; width: 290px; padding: 14px 16px 14px; display: none; }
+  #detail.show { display: block; animation: slide .28s cubic-bezier(.2, .8, .2, 1); }
+  #detail h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+  #detail p { margin: 6px 0 0; font-size: 11.5px; color: #a9c6de; line-height: 1.55; }
+  #detail ul { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+  #detail li {
+    font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: #86b4d2;
+    padding: 4px 7px; border-radius: 6px; background: rgba(34, 211, 238, .06);
+    border: 1px solid rgba(34, 211, 238, .1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #detail .tag { display: inline-block; margin-bottom: 7px; padding: 2px 7px; border-radius: 999px; font-size: 9.5px; letter-spacing: .1em; }
+  #detail .acts { display: flex; gap: 7px; margin-top: 11px; }
+  button {
+    flex: 1; padding: 7px 9px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 11px;
+    color: #d7f4ff; background: rgba(34, 211, 238, .12); border: 1px solid rgba(34, 211, 238, .3);
+    transition: background .18s, transform .12s;
+  }
+  button:hover { background: rgba(34, 211, 238, .22); }
+  button:active { transform: translateY(1px); }
+  button.ghost { background: transparent; border-color: rgba(140, 170, 200, .25); color: #9fb8cd; }
+
+  /* 提示 */
+  #hint { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); font-size: 10.5px; color: #5d7a93; letter-spacing: .06em; pointer-events: none; text-align: center; }
+  #hint kbd { font: inherit; padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(120, 160, 190, .3); color: #8fb6d0; }
+
+  /* 3D 标签 */
+  .node-label { pointer-events: none; user-select: none; text-align: center; transform: translateY(-6px); }
+  .node-label b { display: block; font-size: 12.5px; font-weight: 600; color: #d9f3ff; letter-spacing: .02em; text-shadow: 0 0 12px rgba(10, 40, 70, .95), 0 0 26px rgba(34, 211, 238, .5); }
+  .node-label span { display: none; font-size: 9.5px; color: #7fa8c4; opacity: .8; margin-top: 1px; text-shadow: 0 0 10px rgba(2, 8, 18, .9); }
+  .node-label.hot span, .node-label.sel span { display: block; }
+  .node-label.sel b { color: #fff; }
+  .node-label.hot b { color: #fff; text-shadow: 0 0 16px rgba(34, 211, 238, .95), 0 0 34px rgba(34, 211, 238, .55); }
+
+  #fatal { display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 48px)); padding: 16px 18px; border-color: rgba(239, 68, 68, .4); }
+  #fatal.show { display: block; }
+  #fatal h3 { margin: 0 0 6px; font-size: 13px; color: #fca5a5; letter-spacing: .08em; }
+  #fatal p { margin: 0; font-size: 12px; color: #cbd5e1; line-height: 1.6; word-break: break-word; }
+
+  @media (max-width: 1180px) {
+    #channels, #legend { display: none; }
+    #tickerWrap { width: min(560px, calc(100vw - 48px)); }
+  }
+  @media (max-width: 760px) {
+    #stats { top: auto; bottom: 96px; right: 16px; flex-wrap: wrap; max-width: 200px; }
+    #detail { right: 16px; left: 16px; width: auto; top: auto; bottom: 120px; }
+    #flow { right: 12px; left: 12px; width: auto; top: 96px; bottom: 104px; }
+    #tickerWrap { display: none; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="aura"></div>
+<div id="scan"></div>
+<div id="labels"></div>
+
+<div id="hud">
+  <div id="title" class="panel">
+    <h1>大肥鱼 · 统一智能体</h1>
+    <p>七层架构 × 一个事件流 × 一个执行闸门</p>
+    <div id="live"><i class="dot"></i><span id="liveText">连接事件流…</span></div>
+  </div>
+
+  <div id="stats">
+    <div class="stat"><b id="statEvents">0</b><u>事件 / 分钟</u></div>
+    <div class="stat"><b id="statActions">0</b><u>动作</u></div>
+    <div class="stat" id="statFailBox"><b id="statFails">0</b><u>失败</u></div>
+    <div class="stat"><b id="statTasks">0</b><u>任务</u></div>
+  </div>
+
+  <div id="channels" class="panel">
+    <h3>渠道流量</h3>
+    <div id="chanList"></div>
+  </div>
+
+  <div id="tickerWrap" class="panel">
+    <div id="ticker"><div class="tk" style="color:#57748f"><i style="background:#57748f"></i>等待事件…</div></div>
+  </div>
+
+  <div id="legend" class="panel">
+    <h3>分层</h3>
+    <div id="legendList"></div>
+  </div>
+
+  <div id="flow" class="panel">
+    <header>
+      <div>
+        <span class="badge" id="fBadge">—</span>
+        <h2 id="fName">任务流程</h2>
+        <p class="sub" id="fSub">—</p>
+      </div>
+      <button class="close" id="fClose" title="关闭（Esc）">✕</button>
+    </header>
+    <div class="meta" id="fMeta"></div>
+    <ul class="steps" id="fSteps"></ul>
+    <div class="foot" id="fFoot">点任意一步可回放该步在架构图上的走势</div>
+  </div>
+
+  <div id="detail" class="panel">
+    <span class="tag" id="dTag">—</span>
+    <h2 id="dName">—</h2>
+    <p id="dHint"></p>
+    <ul id="dFacts"></ul>
+    <div class="acts">
+      <button id="dDemo">演示此路径</button>
+      <button id="dReset" class="ghost">复位视角</button>
+    </div>
+  </div>
+
+  <div id="hint">拖拽旋转 · 滚轮缩放 · 点节点看细节 · <kbd>空格</kbd> 暂停自转 · <kbd>R</kbd> 复位</div>
+
+  <div id="fatal" class="panel">
+    <h3>页面没能启动</h3>
+    <p id="fatalText">—</p>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "/arch/vendor/three.module.js",
+    "three/addons/": "/arch/vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="/arch/main.js"></script>
+<script type="module">
+  // 兜底：模块没起来（路径错、importmap 失效）或运行时报错时，把原因直接打在页面上。
+  const fatal = (text) => {
+    const box = document.getElementById('fatal');
+    const line = document.getElementById('fatalText');
+    if (!box || !line) return;
+    line.textContent = text;
+    box.classList.add('show');
+  };
+  window.addEventListener('error', (event) => {
+    if (event?.target && event.target !== window) return;
+    fatal(String(event?.message ?? '未知脚本错误'));
+  });
+  window.addEventListener('unhandledrejection', (event) => fatal(String(event?.reason?.message ?? event?.reason ?? '未处理的 Promise 拒绝')));
+  setTimeout(() => { if (!window.__ARCH_READY__) fatal('前端脚本 3 秒内没有启动：检查 /arch/main.js、/arch/graph.mjs 与 importmap 是否可访问。'); }, 3000);
+</script>
+</body>
+</html>

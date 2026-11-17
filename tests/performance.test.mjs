@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict';import {test} from 'node:test';import {DatabaseSync} from 'node:sqlite';import {performanceStats,recordPerformance} from '../connect/performance.mjs';
+test('性能样本支持 p50 p95 和成功率统计',()=>{const db=new DatabaseSync(':memory:');for(let i=1;i<=100;i++)recordPerformance(db,{stage:'adb',channel:'android',durationMs:i,success:i<90});const s=performanceStats(db,{stage:'adb',channel:'android'});assert.equal(s.samples,100);assert.equal(s.p50,50);assert.equal(s.p95,95);assert.equal(s.success_rate,.89);db.close();});

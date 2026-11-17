@@ -211,6 +211,106 @@ export const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 11,
+    name: 'agent-event-timeline',
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS agent_events(
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'system',
+        conversation_id TEXT,
+        task_id TEXT,
+        skill_run_id TEXT,
+        actor TEXT NOT NULL DEFAULT 'system',
+        payload TEXT NOT NULL DEFAULT '{}',
+        result TEXT,
+        evidence TEXT,
+        privacy_scope TEXT NOT NULL DEFAULT 'private',
+        dedupe_key TEXT UNIQUE,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_events_timeline ON agent_events(created_at,id);
+      CREATE INDEX IF NOT EXISTS agent_events_task ON agent_events(task_id,created_at);`);
+    },
+  },
+  {
+    version: 12,
+    name: 'identity-dynamic-state',
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS identity_state(
+        id INTEGER PRIMARY KEY CHECK(id=1), mood TEXT NOT NULL DEFAULT '平静', energy REAL NOT NULL DEFAULT 0.8,
+        curiosity REAL NOT NULL DEFAULT 0.7, focus TEXT, reason TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      ); INSERT OR IGNORE INTO identity_state(id) VALUES(1);`);
+    },
+  },
+  {
+    version: 13,
+    name: 'identity-acquired-traits',
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS identity_traits(
+        id INTEGER PRIMARY KEY, trait_key TEXT NOT NULL UNIQUE, category TEXT NOT NULL, content TEXT NOT NULL,
+        evidence_count INTEGER NOT NULL DEFAULT 0, confidence REAL NOT NULL DEFAULT 0.5,
+        status TEXT NOT NULL DEFAULT 'candidate' CHECK(status IN ('candidate','active','retired')),
+        source TEXT, last_evidence_at TEXT, created_at TEXT NOT NULL DEFAULT(datetime('now')), updated_at TEXT NOT NULL DEFAULT(datetime('now'))
+      ); CREATE INDEX IF NOT EXISTS identity_traits_status ON identity_traits(status,confidence);`);
+    },
+  },
+  {
+    version: 14,
+    name: 'agent-events-deprecated-in-connect-store',
+    up(db) {
+      // 计划 A-4 / 决策 D3：agent_events 的唯一真源已迁到 CONNECT 库
+      // （runtime/connect/connect.sqlite，见 connect/core/event-store.mjs）。
+      // BRAIN 侧这张表保留 2 周作只读历史，不再写入；这里只补齐 trace_id 列保持同形。
+      db.exec(`CREATE TABLE IF NOT EXISTS agent_events(
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'system',
+        conversation_id TEXT,
+        task_id TEXT,
+        skill_run_id TEXT,
+        actor TEXT NOT NULL DEFAULT 'system',
+        payload TEXT NOT NULL DEFAULT '{}',
+        result TEXT,
+        evidence TEXT,
+        privacy_scope TEXT NOT NULL DEFAULT 'private',
+        dedupe_key TEXT UNIQUE,
+        trace_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_events_timeline ON agent_events(created_at,id);
+      CREATE INDEX IF NOT EXISTS agent_events_task ON agent_events(task_id,created_at);`);
+      // 注意顺序：先补列再建索引（老库里的 agent_events 由 v11 建好，不含 trace_id）。
+      if (!hasColumn(db, 'agent_events', 'trace_id')) db.exec('ALTER TABLE agent_events ADD COLUMN trace_id TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS agent_events_trace ON agent_events(trace_id,created_at)');
+    },
+  },
+  {
+    version: 15,
+    name: 'memory-scope-and-seven-types',
+    up(db) {
+      // P1-A：七类记忆 + 范围维度。R-05/R-07 的病根是长期记忆没有范围维度，
+      // 群聊的记忆会漏进主人私聊召回。加 scope 列做范围过滤，加 type 列落七类枚举。
+      if (!hasColumn(db, 'memories', 'type')) db.exec("ALTER TABLE memories ADD COLUMN type TEXT NOT NULL DEFAULT 'semantic'");
+      if (!hasColumn(db, 'memories', 'scope')) db.exec("ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT 'private'");
+      if (!hasColumn(db, 'memories', 'channel')) db.exec('ALTER TABLE memories ADD COLUMN channel TEXT');
+      if (!hasColumn(db, 'memories', 'peer_id')) db.exec('ALTER TABLE memories ADD COLUMN peer_id TEXT');
+      if (!hasColumn(db, 'memories', 'importance')) db.exec('ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5');
+      // 老 kind → 七类枚举回填；老行都是主人私聊写的，scope 回填 private。
+      db.exec(`UPDATE memories SET type = CASE kind
+        WHEN 'user_fact' THEN 'semantic'
+        WHEN 'pet_preference' THEN 'semantic'
+        WHEN 'shared_episode' THEN 'episodic'
+        WHEN 'daily_digest' THEN 'episodic'
+        WHEN 'activity' THEN 'working'
+        WHEN 'reflection' THEN 'experience'
+        ELSE type END
+        WHERE type = 'semantic' OR type IS NULL`);
+      db.exec("UPDATE memories SET scope = 'private' WHERE scope IS NULL");
+      db.exec('CREATE INDEX IF NOT EXISTS memories_scope ON memories(scope,type,active)');
+    },
+  },
 ];
 
 export function latestVersion() { return MIGRATIONS.at(-1)?.version ?? 0; }

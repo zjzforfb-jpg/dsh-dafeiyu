@@ -29,6 +29,40 @@ export function memoryFromUser(text) {
   return memoryRecordFromUser(text)?.content ?? null;
 }
 
+// P1-A：七类记忆枚举（架构文档：working/episodic/semantic/procedural/social/self/experience）。
+export const MEMORY_TYPES = Object.freeze(['working', 'episodic', 'semantic', 'procedural', 'social', 'self', 'experience']);
+// 老 kind → 七类枚举的兼容别名。
+export const KIND_TO_TYPE = Object.freeze({
+  user_fact: 'semantic', pet_preference: 'semantic', shared_episode: 'episodic',
+  daily_digest: 'episodic', activity: 'working', reflection: 'experience',
+  procedural: 'procedural', social: 'social', self: 'self', experience: 'experience',
+});
+// 范围维度（R-05/R-07）：private=主人私聊，friend=好友，group=群聊，public=到处可见。
+export const MEMORY_SCOPES = Object.freeze(['private', 'friend', 'group', 'public']);
+
+export function typeForKind(kind) {
+  return KIND_TO_TYPE[String(kind ?? '').trim()] ?? 'semantic';
+}
+
+/**
+ * 显式写入一条记忆（跳过 memoryRecordFromUser 的启发式）。
+ * 给七类各自的写入用例、以及群聊/私聊分别落 scope 用。
+ */
+export function remember(db, {
+  content, kind = null, type = null, scope = 'private', channel = null, peerId = null,
+  source = 'user_explicit', confidence = 1, importance = 0.5, tags = null, includeContext = 1,
+} = {}) {
+  const text = String(content ?? '').trim();
+  if (!text) return null;
+  const finalType = type || typeForKind(kind);
+  const finalScope = MEMORY_SCOPES.includes(scope) ? scope : 'private';
+  const inserted = db.prepare(`INSERT INTO memories
+    (content, kind, type, scope, channel, peer_id, source, confidence, importance, tags, include_context)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(text, kind ?? finalType, finalType, finalScope, channel ?? null, peerId ?? null, source, confidence, importance, tags ?? null, includeContext ? 1 : 0);
+  return Number(inserted.lastInsertRowid);
+}
+
 function terms(text) {
   const normalized = String(text ?? '').toLowerCase();
   const out = new Set(normalized.match(/[a-z0-9]{2,}/g) ?? []);
@@ -52,11 +86,19 @@ export function recall(db, question, limit = 5, options = {}) {
   if (typeof limit === 'object') { options = limit; limit = options.limit ?? 5; }
   const safeLimit = Math.max(1, Math.min(30, Number(limit) || 5));
   if (!String(question ?? '').trim()) return [];
-  const rows = db.prepare(`SELECT id, content, kind, source, confidence, created_at, last_accessed_at, access_count
+  // 范围过滤（R-05/R-07）：默认只召回主人私聊（private）可见的记忆；
+  // public 到处可见；group/friend 只在对应范围召回。群聊记忆不会漏进主人私聊。
+  const scope = MEMORY_SCOPES.includes(options.scope) ? options.scope : 'private';
+  const filters = ['(COALESCE(scope,\'private\') = ? OR scope = \'public\')'];
+  const params = [scope];
+  if (options.kind) { filters.push('kind = ?'); params.push(String(options.kind)); }
+  if (options.type) { filters.push('type = ?'); params.push(String(options.type)); }
+  const rows = db.prepare(`SELECT id, content, kind, type, scope, source, confidence, created_at, last_accessed_at, access_count
     FROM memories WHERE active = 1 AND include_context = 1
+    AND NOT EXISTS (SELECT 1 FROM memory_facts mf WHERE mf.memory_id = memories.id AND mf.status IN ('superseded','rejected'))
     AND (expires_at IS NULL OR expires_at > datetime('now'))
-    ${options.kind ? 'AND kind = ?' : ''}
-    ORDER BY id DESC LIMIT 1000`).all(...(options.kind ? [String(options.kind)] : []));
+    AND ${filters.join(' AND ')}
+    ORDER BY id DESC LIMIT 1000`).all(...params);
   const query = terms(question);
   const phrase = String(question ?? '').trim().toLowerCase();
   const scored = rows.map((row) => {
@@ -70,11 +112,11 @@ export function recall(db, question, limit = 5, options = {}) {
     return { ...row, score, match: { exactPhrase, overlap, coverage, confidence, freshness } };
   });
   scored.sort((a, b) => b.score - a.score || b.id - a.id);
-  const relevant = scored.filter((row) => row.score > 0).slice(0, limit);
+  const relevant = scored.filter((row) => row.match.overlap > 0 || row.match.exactPhrase > 0).slice(0, safeLimit);
   if (/今天|今日|刚才|刚刚|干了什么|做了什么|忙了啥/u.test(question)) {
     const stamp = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
-    const activities = db.prepare("SELECT id, content, kind, source, confidence, created_at FROM memories WHERE kind = 'activity' AND active = 1 AND content LIKE ? ORDER BY id DESC LIMIT 8")
-      .all(`【活动·${stamp}】%`).reverse();
+    const activities = db.prepare("SELECT id, content, kind, source, confidence, created_at FROM memories WHERE kind = 'activity' AND active = 1 AND (COALESCE(scope,'private') = ? OR scope = 'public') AND content LIKE ? ORDER BY id DESC LIMIT 8")
+      .all(scope, `【活动·${stamp}】%`).reverse();
     if (activities.length) return [...activities, ...relevant].slice(0, activities.length + safeLimit);
   }
   const result = relevant.length > 0 ? relevant : (/记得|记住|以前|之前|关于我/u.test(String(question)) ? scored.slice(0, safeLimit) : []);
@@ -95,7 +137,10 @@ export function capture(db, userText, assistantText, provenance = {}) {
   const turn = db.prepare('INSERT INTO turns (user_text, assistant_text) VALUES (?, ?)').run(userText, assistantText);
   const source = provenance.source ?? record.source;
   const confidence = provenance.confidence ?? record.confidence;
-  const inserted = db.prepare('INSERT INTO memories (content, source_turn_id, kind, source, confidence) VALUES (?, ?, ?, ?, ?)').run(content, turn.lastInsertRowid, kind, source, confidence);
+  const scope = MEMORY_SCOPES.includes(provenance.scope) ? provenance.scope : 'private';
+  const type = provenance.type || typeForKind(kind);
+  const inserted = db.prepare('INSERT INTO memories (content, source_turn_id, kind, type, scope, channel, peer_id, source, confidence, importance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(content, turn.lastInsertRowid, kind, type, scope, provenance.channel ?? null, provenance.peerId ?? null, source, confidence, provenance.importance ?? 0.5);
   const memoryId = Number(inserted.lastInsertRowid);
   if (['user_fact', 'pet_preference', 'shared_episode'].includes(kind)) {
     const subject = kind === 'pet_preference' ? 'pet' : 'owner';

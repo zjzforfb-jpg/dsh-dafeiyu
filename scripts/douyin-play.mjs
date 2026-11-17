@@ -44,6 +44,7 @@ function gate(text) {
     recentTexts: history.map((item) => item.text),
     lastCommentAt: history.at(-1)?.at ?? 0,
     todayCount: history.filter((item) => dayKey(item.at) === dayKey(now)).length,
+    hourCount: history.filter((item) => now - item.at < 3600_000).length,
     now,
   });
 }

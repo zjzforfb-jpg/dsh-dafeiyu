@@ -81,7 +81,9 @@ export class QqGateway {
       }
       if (packet.t === 'RESUMED') { this.onStatus({ state: 'online', resumed: true }); return; }
       const event = normalize(packet);
-      if (event) Promise.resolve().then(() => this.onEvent(event)).catch(() => {});
+      if (event) Promise.resolve().then(() => this.onEvent(event)).catch((error) => {
+        this.onStatus({ state: 'handler_error', error: String(error?.message ?? error).slice(0, 240) });
+      });
     };
     ws.onerror = () => {};
     ws.onclose = () => {

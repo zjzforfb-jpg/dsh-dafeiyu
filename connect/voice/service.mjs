@@ -1,10 +1,9 @@
 import { VoiceTransport } from './media.mjs';
+import { ensureColumns } from '../core/migrations.mjs';
 import { LocalVoice } from './local.mjs';
 export function initVoice(db){
-  const fields={input_kind:"TEXT NOT NULL DEFAULT 'text'",media_json:'TEXT',transcript_source:'TEXT',delivery_kind:"TEXT NOT NULL DEFAULT 'text'",audio_duration_ms:'INTEGER',voice_confirmed:'INTEGER NOT NULL DEFAULT 0',fallback_status:'TEXT',fallback_outbound_id:'TEXT'};
-  const existing=new Set(db.prepare('PRAGMA table_info(ilink_messages)').all().map(r=>r.name));
-  for(const [name,type] of Object.entries(fields))if(!existing.has(name))db.exec(`ALTER TABLE ilink_messages ADD COLUMN ${name} ${type}`);
-  if(!db.prepare('PRAGMA table_info(ilink_usage)').all().some(r=>r.name==='voice_requests'))db.exec('ALTER TABLE ilink_usage ADD COLUMN voice_requests INTEGER NOT NULL DEFAULT 0');
+  ensureColumns(db, 'ilink_messages', ['input_kind','media_json','transcript_source','delivery_kind','audio_duration_ms','voice_confirmed','fallback_status','fallback_outbound_id']);
+  ensureColumns(db, 'ilink_usage', ['voice_requests']);
   db.exec(`CREATE TABLE IF NOT EXISTS ilink_voice_settings(account_id TEXT PRIMARY KEY,native_state TEXT NOT NULL DEFAULT 'unverified',trial_remaining INTEGER NOT NULL DEFAULT 0,verified_at TEXT,last_error TEXT);
     UPDATE ilink_messages SET status='failed',error='voice_preparation_interrupted' WHERE status IN ('transcribing','synthesizing');
     UPDATE ilink_messages SET fallback_status='unknown' WHERE fallback_status='sending';`);

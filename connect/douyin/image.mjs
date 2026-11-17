@@ -3,6 +3,7 @@
  * 走 https://api.minimax.cn/v1/image_generation，返回本地 jpg 路径。
  */
 import { execFileSync } from 'node:child_process';
+import { runtimeDir } from '../core/paths.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { generateImageGrs } from './grs.mjs';
@@ -39,7 +40,7 @@ export async function generateImage(prompt, { root = process.cwd(), aspect = '1:
   const bytes = Buffer.from(await image.arrayBuffer());
   if (bytes.length < 1024) throw new Error('image_too_small');
 
-  const file = join(root, 'runtime', 'douyin', 'images', `image-${Date.now()}.jpg`);
+  const file = join(runtimeDir(root), 'douyin', 'images', `image-${Date.now()}.jpg`);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, bytes, { mode: 0o600 });
   return { file, bytes: bytes.length, prompt: text, aspect };
@@ -47,7 +48,7 @@ export async function generateImage(prompt, { root = process.cwd(), aspect = '1:
 
 /** 统一入口：优先 grs（nano-banana-2.1 → gpt-image-2.6-flare，2K），失败再回落 MiniMax。 */
 export async function generateImageAuto(prompt, { root = process.cwd(), aspect = '3:4', refs, models } = {}) {
-  const referenceRefs = refs ?? [join(root, 'runtime', 'douyin', 'refs', 'dafeiyu-ref.png')];
+  const referenceRefs = refs ?? [join(runtimeDir(root), 'douyin', 'refs', 'dafeiyu-ref.png')];
   try {
     const result = await generateImageGrs(prompt, { root, refs: referenceRefs, aspectRatio: aspect, models });
     return { ...result, provider: 'grsai' };

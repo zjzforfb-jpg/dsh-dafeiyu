@@ -13,10 +13,19 @@ test('friend Bot messages cannot recall or edit owner memory; owner keeps cross-
  await new Promise(r=>upstream.listen(0,'127.0.0.1',r));
  const brain=await startBrain({home,token:'local',apiKey:'fake',port:0,upstreamUrl:`http://127.0.0.1:${upstream.address().port}`});
  const ask=(text,role,inputKind='text')=>fetch(`http://127.0.0.1:${brain.port}/v1/chat/completions`,{method:'POST',headers:{authorization:'Bearer local','content-type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:text}],metadata:{connect:{channel:'ilink',role,account_id:'bot',peer_id:'peer',input_kind:inputKind}}})});
+ const askQq=(text,role,conversationKind,messageId)=>fetch(`http://127.0.0.1:${brain.port}/v1/chat/completions`,{method:'POST',headers:{authorization:'Bearer local','content-type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:text}],metadata:{connect:{channel:'qq',role,account_id:'qq-bot',peer_id:conversationKind==='group'?'group-1':'friend-1',conversation_kind:conversationKind,input_kind:'text',message_id:messageId}}})});
  try{
  for(const text of ['爸爸的私密爱好是什么？','更正记忆 1：我改了','忘记记忆 1','请记住：访客内容'])assert.equal((await ask(text,'friend')).status,200);
+ assert.equal((await askQq('爸爸的私密爱好是什么？','member','group','qq-group-read')).status,200);
+ assert.equal((await askQq('请记住：群里的新事实','member','group','qq-group-write')).status,200);
+ assert.equal((await askQq('请记住：好友的新事实','friend','direct','qq-friend-write')).status,200);
  assert.equal(seen.some(b=>b.messages[0].content.includes('紫色星云')),false);assert.equal(seen.every(b=>b.metadata===undefined),true);
- const check=openMemory(join(home,'dafeiyu-memory.sqlite'));assert.equal(check.prepare('SELECT COUNT(*) AS n FROM memories').get().n,1);assert.match(check.prepare('SELECT content FROM memories').get().content,/紫色星云/);check.close();
+ const check=openMemory(join(home,'dafeiyu-memory.sqlite'));assert.equal(check.prepare('SELECT COUNT(*) AS n FROM memories').get().n,1);assert.match(check.prepare('SELECT content FROM memories').get().content,/紫色星云/);
+ const qqEvents=check.prepare("SELECT channel,privacy_scope,payload FROM agent_events WHERE channel='qq' AND event_type='message_received'").all();
+ assert.equal(qqEvents.length,3);
+ assert.deepEqual(new Set(qqEvents.map(row=>row.privacy_scope)),new Set(['group','friend']));
+ assert.ok(qqEvents.every(row=>JSON.parse(row.payload).trace_id));
+ check.close();
  assert.equal((await ask('爸爸的私密爱好是什么？','owner')).status,200);assert.match(seen.at(-1).messages[0].content,/紫色星云/);assert.match(seen.at(-1).messages[0].content,/2026\/11\/14 06:55 北京时间/);
  assert.equal((await ask('忘记记忆 1','owner','voice')).status,200);
  const voiceCheck=openMemory(join(home,'dafeiyu-memory.sqlite'));assert.equal(voiceCheck.prepare('SELECT COUNT(*) AS n FROM memories').get().n,1);voiceCheck.close();

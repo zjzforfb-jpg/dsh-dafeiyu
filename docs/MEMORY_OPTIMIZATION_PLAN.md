@@ -82,4 +82,4 @@
 
 - M1 代码已落地：`brain/memory.mjs`、`brain/migrations.mjs`。
 - 新增长期检索回归测试。
-- 最新完整测试：70 项通过。
+- 最新完整测试：71 项通过。

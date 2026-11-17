@@ -43,6 +43,22 @@ test('call service transcribes, replies and returns base64 audio while keeping h
   assert.deepEqual(asked[1].history, [{ role: 'user', content: '爸爸你好' }, { role: 'assistant', content: '我在呢' }]);
 });
 
+test('call turn emits message_received and message_replied into the event stream', async () => {
+  const events = [];
+  const calls = new CallService({ voice: fakeVoice(), ask: async () => '我在呢', onEvent: e => events.push(e) });
+  await calls.respond(SESSION, { data: pcm(1).toString('base64'), sampleRate: 16000 });
+  assert.equal(events[0].eventType, 'message_received');
+  assert.equal(events[0].text, '爸爸你好');
+  assert.equal(events[0].sessionId, SESSION);
+  assert.equal(events[1].eventType, 'message_replied');
+  assert.equal(events[1].reply, '我在呢');
+  assert.equal(events[1].sessionId, SESSION);
+  // 事件记录失败绝不影响通话：坏 onEvent 也不该抛。
+  const safe = new CallService({ voice: fakeVoice(), ask: async () => '在', onEvent: () => { throw new Error('listener_boom'); } });
+  const r = await safe.respond(SESSION, { data: pcm(1).toString('base64'), sampleRate: 16000 });
+  assert.equal(r.reply, '在');
+});
+
 test('call service streams reply audio chunks when the voice supports it', async () => {
   const sent = [];
   const voice = fakeVoice({

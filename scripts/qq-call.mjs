@@ -15,7 +15,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ensureBinaries } from '../connect/macui/index.mjs';
-import { dial, hangup, waitCallEnd } from '../connect/macui/qq.mjs';
+import { dial, findMainWindow, hangup, watchCall } from '../connect/macui/qq.mjs';
+import { listWindows } from '../connect/macui/index.mjs';
+import { QQ_LAYOUT } from '../connect/macui/qq.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { recordAgentEvent } from '../connect/agent-events.mjs';
 
 const base = resolve(import.meta.dirname, '..');
 const contactsPath = resolve(base, 'runtime/sound/contacts.json');
@@ -66,8 +70,67 @@ function startBridge() {
   return child.pid;
 }
 
+/** 把「这通电话最后怎么了」落成文件 + 事件，接在任务回执后面能看见。 */
+function describeOutcome(outcome) {
+  return {
+    ended: '接通后正常结束',
+    rejected: '对方拒接',
+    no_answer: '拨出去了但没人接',
+    cancelled: '已取消',
+    timeout_connected: '通话超时（还连着）',
+    timeout_ringing: '一直没人接（超时）',
+  }[outcome] ?? outcome;
+}
+
+function recordOutcome({ contact, call, result }) {
+  const outcomePath = resolve(base, 'runtime/sound/call-outcome.json');
+  const payload = {
+    peer: contact,
+    windowId: call?.id ?? null,
+    outcome: result.outcome,
+    connected: result.connected,
+    durationMs: result.durationMs,
+    at: new Date().toISOString(),
+  };
+  try {
+    mkdirSync(resolve(base, 'runtime/sound'), { recursive: true });
+    writeFileSync(outcomePath, JSON.stringify(payload, null, 2));
+  } catch (error) {
+    console.error(`写 call-outcome.json 失败：${error.message}`);
+  }
+  try {
+    const db = new DatabaseSync(resolve(base, 'runtime/connect/connect.sqlite'));
+    recordAgentEvent(db, {
+      eventType: 'call_ended',
+      channel: 'call',
+      actor: 'qq-call',
+      payload: { ...payload, summary: describeOutcome(result.outcome) },
+      dedupeKey: `call_ended:${call?.id ?? contact}:${Math.floor(Date.now() / 1000)}`,
+    });
+    db.close();
+  } catch (error) {
+    console.error(`记 call_ended 事件失败：${error.message}`);
+  }
+}
+
 async function main() {
   const bins = ensureBinaries(base);
+
+  // --probe：只回答「能不能拨」——窗口在不在、联系人叫什么、按钮坐标在哪，绝不拨号
+  if (has('probe')) {
+    const contact = option('contact', loadContacts().qq ?? '七海');
+    const windows = listWindows(bins, QQ_LAYOUT.owner);
+    const main = findMainWindow(windows);
+    console.log(JSON.stringify({
+      ok: Boolean(main),
+      contact,
+      window: main ? { id: main.id, name: main.name, width: main.width, height: main.height } : null,
+      windows: windows.map((w) => ({ name: w.name, width: w.width, height: w.height })),
+      dial: QQ_LAYOUT.callIcon,
+      note: '探针：不拨号、不动声卡',
+    }, null, 1));
+    return;
+  }
 
   if (has('stop')) {
     const stopped = stopBridge();
@@ -93,8 +156,11 @@ async function main() {
     console.log(`☎ 正在呼叫「${contact}」（窗口 ${call.id}，${call.width}x${call.height}）。`);
     console.log('通话中：直接说话即可，大肥鱼会接话；挂断后自动收尾。Ctrl+C 也能结束。');
 
-    const ended = await waitCallEnd(bins);
-    console.log(ended ? '通话窗口已关闭。' : '等待通话结束超时。');
+    // 以前窗口一消失就只知道「结束了」：接通聊十分钟、对方拒接、没人接，三种结局一模一样。
+    const result = await watchCall(bins);
+    const seconds = Math.round(result.durationMs / 1000);
+    console.log(`通话窗口已关闭：${describeOutcome(result.outcome)}（${seconds}s，接通=${result.connected ? '是' : '否'}）。`);
+    recordOutcome({ contact, call, result });
   } finally {
     stopBridge();
     if (!has('keep')) runSound('--restore');

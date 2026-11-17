@@ -142,3 +142,13 @@ npm run service:start
 记忆分层说明见 [MEMORY_MODEL.md](docs/MEMORY_MODEL.md)：每日渠道消息进入短期日记忆，凌晨整理为当天摘要，长期记忆仍需符合来源、隐私和重要度规则。
 
 长期记忆与搜索优化路线见 [MEMORY_OPTIMIZATION_PLAN.md](docs/MEMORY_OPTIMIZATION_PLAN.md)。
+
+认知中枢、程序性记忆和技能进化的分阶段计划见 [COGNITIVE_ARCHITECTURE_PLAN.md](docs/COGNITIVE_ARCHITECTURE_PLAN.md)。
+
+记忆、认知、技能进化和人格成长的统一实施总计划见 [DAFEIYU_MEMORY_COGNITION_MASTER_PLAN.md](docs/DAFEIYU_MEMORY_COGNITION_MASTER_PLAN.md)。
+
+后续可追踪目标见 [NEXT_GOALS.md](docs/NEXT_GOALS.md)。
+
+发布检查和 Magic5 重连流程见 [RELEASE_RUNBOOK.md](docs/RELEASE_RUNBOOK.md)。
+
+项目结构、技术栈和运行流程见 [PROJECT_MINDMAP.md](docs/PROJECT_MINDMAP.md)。

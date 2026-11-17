@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="description" content="大肥鱼：跑在这台 Mac 上的个人智能体。会看抖音、写图文、回评论，也会给你打电话、接你电话。" />
+<title>大肥鱼 · 主页</title>
+<link rel="stylesheet" href="/shell/nav.css" />
+<link rel="icon" href="/home/pet.png" />
+<link rel="stylesheet" href="/home/home.css" />
+<script src="/shell/nav.js" defer></script>
+<script type="module" src="/home/home.js"></script>
+</head>
+<body class="home">
+<a class="skip" href="#main">跳到主要内容</a>
+
+<header class="hero">
+  <div class="heroText">
+    <p class="eyebrow">个人智能体 · 跑在这台 Mac 上</p>
+    <h1>大肥鱼</h1>
+    <p class="claim">
+      会看抖音、写图文、回评论，<br />
+      也会给你打电话、接你电话。
+    </p>
+    <p class="lede">
+      <strong><span id="capTotal">21</span> 项能力</strong>，四个入口（QQ · 微信 · 语音通话 · 手机），
+      每一步都记在账上，做完会回执，做错能回滚。
+    </p>
+    <p class="links">
+      <a class="cta" href="/live/">看它正在干什么 →</a>
+      <a class="cta ghost" href="/board">运行看板</a>
+      <a class="cta ghost" href="/arch/">3D 架构</a>
+    </p>
+    <dl class="heroStats" id="heroStats" aria-label="今天的运行情况">
+      <div><dt>今日事件</dt><dd id="statEvents">—</dd></div>
+      <div><dt>今日执行</dt><dd id="statActions">—</dd></div>
+      <div><dt>今日失败</dt><dd id="statFails">—</dd></div>
+      <div><dt>等你确认</dt><dd id="statAwaiting">—</dd></div>
+    </dl>
+    <p class="nextLine" id="nextLine" hidden></p>
+  </div>
+  <figure class="portrait">
+    <div class="portraitFrame">
+      <img src="/home/pet.png" width="384" height="384" alt="大肥鱼：蓝头发的鲸鱼女仆形象" />
+    </div>
+    <figcaption>大肥鱼 · 桌宠本尊</figcaption>
+  </figure>
+</header>
+
+<main id="main">
+
+  <section class="capSection" aria-labelledby="toolsTitle" id="tools">
+    <div class="secHead">
+      <h2 id="toolsTitle">它能做什么</h2>
+      <p class="sub">
+        <span id="toolCount">22</span> 项能力，按场景分五组。点能力名展开细节；
+        <span class="lvl auto">全自动</span><span class="lvl ai">AI 介入</span><span class="lvl review">人工审核</span> 告诉你这一步谁在拿主意。
+      </p>
+    </div>
+    <div class="chips" id="toolFilters" role="group" aria-label="按执行方式筛选能力">
+      <button class="chip" data-level="" aria-pressed="true">全部</button>
+      <button class="chip" data-level="auto" aria-pressed="false">全自动</button>
+      <button class="chip" data-level="ai" aria-pressed="false">AI 介入</button>
+      <button class="chip" data-level="review" aria-pressed="false">人工审核</button>
+      <button class="chip" data-level="missing" aria-pressed="false">未实现</button>
+    </div>
+    <div class="groups" id="toolGrid"></div>
+    <p class="sub note" id="toolNote">想看每项的输入输出与最近运行，去 <a href="/live/?tab=tools">实时工作流 · 工具清单</a>。</p>
+  </section>
+
+  <section aria-labelledby="stackTitle" id="stack">
+    <div class="secHead">
+      <h2 id="stackTitle">用什么搭的</h2>
+      <p class="sub">四组。点一组展开，每条都能对到代码位置。</p>
+    </div>
+    <div class="stackGrid" id="stackGrid"></div>
+  </section>
+
+  <section aria-labelledby="pipeTitle" id="pipeline">
+    <div class="secHead">
+      <h2 id="pipeTitle">消息怎么走</h2>
+      <p class="sub">一条消息穿过九段。默认收着，排查时再展开。</p>
+    </div>
+    <ol class="flow" id="flow"></ol>
+    <div id="flowDetail"></div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p class="sub">8765 · connect 服务　|　<a href="/home/">主页</a> · <a href="/board">运行看板</a> · <a href="/live/">实时工作流</a> · <a href="/arch/">3D 架构</a></p>
+</footer>
+</body>
+</html>

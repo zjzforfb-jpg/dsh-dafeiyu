@@ -5,6 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { openMemory, recall, capture, reviseMemory, forgetMemory } from './memory.mjs';
 import { classifyConversation, publishDesktopActivity } from '../desktop/activity.mjs';
 import { recordDailyExchange } from '../connect/daily-memory.mjs';
+import { recordAgentEvent } from '../connect/agent-events.mjs';
+import { openEventStore } from '../connect/core/event-store.mjs';
+import { interactionEvent } from '../connect/core-contract.mjs';
+import { evaluatePolicy } from '../connect/policy.mjs';
+import { getIdentityState } from './identity-state.mjs';
+import { listIdentityTraits } from './identity-traits.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
@@ -66,8 +72,16 @@ function userFacingText(raw) {
   return raw.split(/\n\n\[(?:配图|动作)\]/u, 1)[0].trim();
 }
 
-export async function startBrain({ home, token, apiKey, personaPath, port = 3110, petPort = null, upstreamUrl = 'https://api.deepseek.com' }) {
+export async function startBrain({ home, token, apiKey, personaPath, port = 3110, petPort = null, upstreamUrl = 'https://api.deepseek.com', eventStoreRoot = null }) {
   const db = openMemory(join(home, 'dafeiyu-memory.sqlite'));
+  // 计划 A-4 / 决策 D3：agent_events 的唯一真源是 CONNECT 库，桌面事件因此能上看板。
+  // 记忆类数据（memories / daily_memory_events / identity / life）仍留在 BRAIN 库。
+  // eventStoreRoot 指向 runtime 目录；没给就退回 BRAIN 库（旧行为，已弃用，仅供未迁移的调用方）。
+  let eventDb = db;
+  if (eventStoreRoot) {
+    try { eventDb = openEventStore(eventStoreRoot); }
+    catch (error) { console.error(JSON.stringify({ event_store_failed: String(error?.message ?? error).slice(0, 200) })); }
+  }
   const server = createServer(async (req, res) => {
     const path = new URL(req.url ?? '/', `http://127.0.0.1:${port}`).pathname;
     if (req.method === 'GET' && path === '/health') {
@@ -100,18 +114,32 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
       return;
     }
     const connectScope = body.metadata?.connect;
-    if (connectScope !== undefined && (!connectScope || connectScope.channel !== 'ilink' || !['owner','friend'].includes(connectScope.role) || (connectScope.input_kind !== undefined && !['text','voice'].includes(connectScope.input_kind)) || ['account_id','peer_id'].some(key => typeof connectScope[key] !== 'string' || !connectScope[key] || connectScope[key].length > 256))) {
+    if (connectScope !== undefined && (!connectScope || !['ilink','qq'].includes(connectScope.channel) || !['owner','friend','member'].includes(connectScope.role) || (connectScope.channel === 'qq' && connectScope.conversation_kind === 'group' && connectScope.role === 'owner') || (connectScope.conversation_kind !== undefined && !['direct','group'].includes(connectScope.conversation_kind)) || (connectScope.input_kind !== undefined && !['text','voice'].includes(connectScope.input_kind)) || ['account_id','peer_id'].some(key => typeof connectScope[key] !== 'string' || !connectScope[key] || connectScope[key].length > 256))) {
       sendJson(res, 400, { error: { message: 'Invalid communication scope', type: 'invalid_request_error' } }); return;
     }
-    const isFriend = connectScope?.role === 'friend';
+    const isFriend = Boolean(connectScope && connectScope.role !== 'owner');
     const isVoice = connectScope?.input_kind === 'voice';
     const provenance = isVoice ? {source:'user_voice_transcript',confidence:0.85} : {};
     const scopeNote = connectScope ? (isFriend
-      ? '\n\n本轮是微信 Bot 的其他联系人，不是爸爸。只使用当前联系人提供的对话内容；系统没有提供爸爸的私人记忆或日记。不能替该联系人保存、修改或删除爸爸的记忆。不要称呼对方为爸爸。'
-      : '\n\n本轮来自已经扫码绑定并获准的爸爸，通过微信 Bot 交流。可使用相关的爸爸记忆；你仍然是大肥鱼AI伙伴。') : '';
+      ? '\n\n本轮来自其他联系人或群聊成员，不是爸爸。只使用当前会话的内容；系统没有提供爸爸的私人记忆或日记。不能替该联系人保存、修改或删除爸爸的记忆。不要称呼对方为爸爸。'
+      : '\n\n本轮来自已验证的爸爸。可使用相关的爸爸记忆；你仍然是大肥鱼AI伙伴。') : '';
     const userText = userFacingText([...body.messages].reverse().find((message) => message.role === 'user')?.content ?? '');
-    const correction = isFriend ? null : userText.match(/^(?:爸爸)?(?:请)?更正记忆\s*#?(\d+)[：:,，\s]+(.+)$/u);
-    const forget = isFriend ? null : userText.match(/^(?:爸爸)?(?:请)?忘记记忆\s*#?(\d+)\s*$/u);
+    const requestId = randomUUID();
+    const interaction = interactionEvent({
+      channel: connectScope?.channel === 'ilink' ? 'wechat' : connectScope?.channel ?? 'desktop',
+      accountId: connectScope?.account_id ?? '',
+      conversationKind: connectScope?.conversation_kind ?? 'direct',
+      conversationId: connectScope?.peer_id ?? 'desktop',
+      senderId: connectScope?.peer_id ?? 'desktop',
+      senderRole: connectScope?.role ?? 'owner',
+      text: userText,
+      inputKind: connectScope?.input_kind ?? 'text',
+      sourceEventId: connectScope?.message_id ?? requestId,
+    });
+    const mayReadOwnerMemory = evaluatePolicy(interaction, 'memory.read.owner').allowed;
+    const mayWriteOwnerMemory = evaluatePolicy(interaction, 'memory.write.owner').allowed;
+    const correction = mayWriteOwnerMemory ? userText.match(/^(?:爸爸)?(?:请)?更正记忆\s*#?(\d+)[：:,，\s]+(.+)$/u) : null;
+    const forget = mayWriteOwnerMemory ? userText.match(/^(?:爸爸)?(?:请)?忘记记忆\s*#?(\d+)\s*$/u) : null;
     let memoryActionNote = '';
     if (isVoice && (correction || forget)) {
       memoryActionNote = '本轮由语音识别得到，没有执行更正或删除记忆；为避免误识别，请爸爸改用文字确认编号与内容。';
@@ -129,8 +157,12 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
     }
     const baseSystem = body.messages.find((message) => message.role === 'system')?.content ?? '';
     const persona = personaPath ? readFileSync(personaPath, 'utf8') : '';
-    const messages = [{ role: 'system', content: `${persona}\n\n${baseSystem}${memoryActionNote ? `\n\n本轮记忆操作结果：${memoryActionNote} 请只按此结果向爸爸确认。` : ''}${scopeNote}${isFriend ? '' : memorySection(db, userText)}${isFriend ? '' : lifeSection(db)}` }, ...body.messages.filter((message) => message.role !== 'system')];
-    const requestId = randomUUID();
+    const identityState = mayReadOwnerMemory ? getIdentityState(db) : null;
+    const traits = mayReadOwnerMemory ? listIdentityTraits(db,{status:'active',limit:8}) : [];
+    const traitNote = traits.length ? `\n\n已形成的后天特征（有多次证据支持）：${traits.map(t=>t.content).join('；')}。` : '';
+    const stateNote = identityState ? `\n\n当前动态状态：心情=${identityState.mood}，精力=${identityState.energy}，好奇心=${identityState.curiosity}，关注=${identityState.focus ?? '无'}。状态只影响表达，不代表永久人格事实。${traitNote}` : traitNote;
+    const messages = [{ role: 'system', content: `${persona}\n\n${baseSystem}${stateNote}${memoryActionNote ? `\n\n本轮记忆操作结果：${memoryActionNote} 请只按此结果向爸爸确认。` : ''}${scopeNote}${mayReadOwnerMemory ? memorySection(db, userText) : ''}${mayReadOwnerMemory ? lifeSection(db) : ''}` }, ...body.messages.filter((message) => message.role !== 'system')];
+    try { recordAgentEvent(eventDb, { id: `${requestId}:in`, eventType: 'message_received', channel: interaction.channel, conversationId: connectScope?.peer_id ?? 'desktop', actor: isFriend ? 'friend' : 'owner', traceId: interaction.trace_id, payload: { trace_id: interaction.trace_id, input_kind: connectScope?.input_kind ?? 'text', text_length: userText.length, request_id: requestId }, privacyScope: interaction.trust.source_class, dedupeKey: `${interaction.event_id}:in` }); } catch {}
     const activity = classifyConversation(userText);
     const startActivity = !petPort ? Promise.resolve({ok:false}) : publishDesktopActivity({ db, home, port: petPort, eventKey: `${requestId}:start`, event: { source: 'conversation', activity: 'thinking', phase: 'start', bubble: false } }).catch(() => ({ ok: false }));
     const finishActivity = async (phase, selected = activity) => {
@@ -162,10 +194,11 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
       if (!body.stream) {
         const data = await upstream.json();
         const answer = data.choices?.[0]?.message?.content;
-        if (!isFriend && typeof answer === 'string' && answer.trim()) {
+        if (mayWriteOwnerMemory && typeof answer === 'string' && answer.trim()) {
           capture(db, userText, answer, provenance);
           if (!connectScope) recordDailyExchange(db,{channel:'desktop',conversationKind:'direct',peerId:'desktop',inputKind:'text',userText,assistantText:answer,privacyScope:'private',importance:0.7});
         }
+        try { recordAgentEvent(eventDb, { id: `${requestId}:out`, eventType: typeof answer === 'string' && answer.trim() ? 'message_replied' : 'action_failed', channel: interaction.channel, conversationId: connectScope?.peer_id ?? 'desktop', actor: 'assistant', traceId: interaction.trace_id, payload: { trace_id: interaction.trace_id, request_id: requestId, stream: false }, result: { ok: typeof answer === 'string' && Boolean(answer.trim()) }, privacyScope: interaction.trust.source_class, dedupeKey: `${interaction.event_id}:out` }); } catch {}
         if (typeof answer === 'string' && answer.trim()) void finishActivity('done');
         else void finishActivity('error', 'error');
         sendJson(res, 200, data);
@@ -186,10 +219,11 @@ export async function startBrain({ home, token, apiKey, personaPath, port = 3110
           answer += parseSseText(block);
         }
       }
-      if (!isFriend && completed && answer.trim()) {
+      if (mayWriteOwnerMemory && completed && answer.trim()) {
         capture(db, userText, answer, provenance);
         if (!connectScope) recordDailyExchange(db,{channel:'desktop',conversationKind:'direct',peerId:'desktop',inputKind:'text',userText,assistantText:answer,privacyScope:'private',importance:0.7});
       }
+      try { recordAgentEvent(eventDb, { id: `${requestId}:out`, eventType: completed && answer.trim() ? 'message_replied' : 'action_failed', channel: interaction.channel, conversationId: connectScope?.peer_id ?? 'desktop', actor: 'assistant', traceId: interaction.trace_id, payload: { trace_id: interaction.trace_id, request_id: requestId, stream: true }, result: { ok: Boolean(completed && answer.trim()) }, privacyScope: interaction.trust.source_class, dedupeKey: `${interaction.event_id}:out` }); } catch {}
       if (completed && answer.trim()) void finishActivity('done');
       else void finishActivity('error', 'error');
       res.end();
